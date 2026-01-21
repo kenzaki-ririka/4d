@@ -1,18 +1,51 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
+
 <head>
     <meta charset="UTF-8">
     <title>4D 几何模拟器</title>
     <style>
-        body { margin: 0; overflow: hidden; background-color: #050505; color: white; font-family: 'Segoe UI', sans-serif; }
-        #info { 
-            position: absolute; top: 10px; width: 100%; text-align: center; pointer-events: none; z-index: 10; 
-            text-shadow: 0 0 5px #000; background: linear-gradient(to bottom, rgba(0,0,0,0.8), transparent);
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #050505;
+            color: white;
+            font-family: 'Segoe UI', sans-serif;
+        }
+
+        #info {
+            position: absolute;
+            top: 10px;
+            width: 100%;
+            text-align: center;
+            pointer-events: none;
+            z-index: 10;
+            text-shadow: 0 0 5px #000;
+            background: linear-gradient(to bottom, rgba(0, 0, 0, 0.8), transparent);
             padding-bottom: 20px;
         }
-        h2 { margin: 5px 0; font-weight: 300; letter-spacing: 2px; color: #00ffcc; }
-        p { font-size: 0.9rem; opacity: 0.8; }
-        #loading { position: absolute; top: 50%; width: 100%; text-align: center; color: #00ffcc; transition: opacity 0.5s; pointer-events: none;}
+
+        h2 {
+            margin: 5px 0;
+            font-weight: 300;
+            letter-spacing: 2px;
+            color: #00ffcc;
+        }
+
+        p {
+            font-size: 0.9rem;
+            opacity: 0.8;
+        }
+
+        #loading {
+            position: absolute;
+            top: 50%;
+            width: 100%;
+            text-align: center;
+            color: #00ffcc;
+            transition: opacity 0.5s;
+            pointer-events: none;
+        }
     </style>
     <script type="importmap">
         {
@@ -24,6 +57,7 @@
         }
     </script>
 </head>
+
 <body>
     <div id="info">
         <h2>4D 几何模拟器</h2>
@@ -47,83 +81,148 @@
             clone() { return new Vector4(this.x, this.y, this.z, this.w); }
             applyMatrix(m) {
                 const x = this.x, y = this.y, z = this.z, w = this.w;
-                this.x = m[0]*x + m[1]*y + m[2]*z + m[3]*w;
-                this.y = m[4]*x + m[5]*y + m[6]*z + m[7]*w;
-                this.z = m[8]*x + m[9]*y + m[10]*z + m[11]*w;
-                this.w = m[12]*x + m[13]*y + m[14]*z + m[15]*w;
+                this.x = m[0] * x + m[1] * y + m[2] * z + m[3] * w;
+                this.y = m[4] * x + m[5] * y + m[6] * z + m[7] * w;
+                this.z = m[8] * x + m[9] * y + m[10] * z + m[11] * w;
+                this.w = m[12] * x + m[13] * y + m[14] * z + m[15] * w;
             }
         }
 
         // 生成 4D 旋转矩阵
         function getRotationMatrix(angle, plane) {
             const c = Math.cos(angle), s = Math.sin(angle);
-            const m = [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1];
+            const m = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
             let i, j; // i, j 对应矩阵行列索引 (0=x, 1=y, 2=z, 3=w)
-            
-            if (plane === 'xy') { i=0; j=1; } 
-            else if (plane === 'xz') { i=0; j=2; } 
-            else if (plane === 'xw') { i=0; j=3; }
-            else if (plane === 'yz') { i=1; j=2; } 
-            else if (plane === 'yw') { i=1; j=3; } 
-            else if (plane === 'zw') { i=2; j=3; }
-            
-            m[i*4+i] = c; m[i*4+j] = -s; 
-            m[j*4+i] = s; m[j*4+j] = c;
+
+            if (plane === 'xy') { i = 0; j = 1; }
+            else if (plane === 'xz') { i = 0; j = 2; }
+            else if (plane === 'xw') { i = 0; j = 3; }
+            else if (plane === 'yz') { i = 1; j = 2; }
+            else if (plane === 'yw') { i = 1; j = 3; }
+            else if (plane === 'zw') { i = 2; j = 3; }
+
+            m[i * 4 + i] = c; m[i * 4 + j] = -s;
+            m[j * 4 + i] = s; m[j * 4 + j] = c;
             return m;
+        }
+
+        // --- 排列组合辅助函数 ---
+        function getEvenPermutations4(arr) {
+            // indices: 0123
+            const perms = [
+                [0, 1, 2, 3], [0, 2, 3, 1], [0, 3, 1, 2],
+                [1, 0, 3, 2], [1, 2, 0, 3], [1, 3, 2, 0],
+                [2, 0, 1, 3], [2, 1, 3, 0], [2, 3, 0, 1],
+                [3, 0, 2, 1], [3, 1, 0, 2], [3, 2, 1, 0]
+            ];
+            const result = [];
+            for (let p of perms) {
+                result.push(new Vector4(arr[p[0]], arr[p[1]], arr[p[2]], arr[p[3]]));
+            }
+            return result;
+        }
+
+        function getAllSigned(vecs) {
+            const result = [];
+            for (let v of vecs) {
+                // Generate 2^4 = 16 sign combinations, but we optimized for 0s
+                // To keep it simple and robust:
+                for (let i = 0; i < 16; i++) {
+                    let x = v.x, y = v.y, z = v.z, w = v.w;
+                    if (i & 1) x = -x;
+                    if (i & 2) y = -y;
+                    if (i & 4) z = -z;
+                    if (i & 8) w = -w;
+                    // Deduplicate later or now? Now is hard with floats. 
+                    // Dedup at the end by string key.
+                    result.push(new Vector4(x, y, z, w));
+                }
+            }
+            return result;
+        }
+
+        function createEdgesByDistance(vertices, targetDist, tolerance = 0.01) {
+            const edges = [];
+            for (let i = 0; i < vertices.length; i++) {
+                for (let j = i + 1; j < vertices.length; j++) {
+                    const d2 = Math.pow(vertices[i].x - vertices[j].x, 2) +
+                        Math.pow(vertices[i].y - vertices[j].y, 2) +
+                        Math.pow(vertices[i].z - vertices[j].z, 2) +
+                        Math.pow(vertices[i].w - vertices[j].w, 2);
+                    if (Math.abs(Math.sqrt(d2) - targetDist) < tolerance) {
+                        edges.push([i, j]);
+                    }
+                }
+            }
+            return edges;
+        }
+
+        // Remove duplicates from vertices
+        function uniqueVertices(verts) {
+            const map = new Map();
+            const unique = [];
+            for (let v of verts) {
+                const key = `${v.x.toFixed(4)},${v.y.toFixed(4)},${v.z.toFixed(4)},${v.w.toFixed(4)}`;
+                if (!map.has(key)) {
+                    map.set(key, true);
+                    unique.push(v);
+                }
+            }
+            return unique;
         }
 
         // --- 几何生成器 ---
         const Generators = {
             tesseract: () => {
                 const vertices = []; const edges = [];
-                for(let i=0;i<16;i++) vertices.push(new Vector4((i&1)?1:-1, (i&2)?1:-1, (i&4)?1:-1, (i&8)?1:-1));
-                for(let i=0;i<16;i++) for(let j=i+1;j<16;j++) {
-                    let d=0; if(vertices[i].x!==vertices[j].x)d++; if(vertices[i].y!==vertices[j].y)d++;
-                    if(vertices[i].z!==vertices[j].z)d++; if(vertices[i].w!==vertices[j].w)d++;
-                    if(d===1) edges.push([i,j]);
+                for (let i = 0; i < 16; i++) vertices.push(new Vector4((i & 1) ? 1 : -1, (i & 2) ? 1 : -1, (i & 4) ? 1 : -1, (i & 8) ? 1 : -1));
+                for (let i = 0; i < 16; i++) for (let j = i + 1; j < 16; j++) {
+                    let d = 0; if (vertices[i].x !== vertices[j].x) d++; if (vertices[i].y !== vertices[j].y) d++;
+                    if (vertices[i].z !== vertices[j].z) d++; if (vertices[i].w !== vertices[j].w) d++;
+                    if (d === 1) edges.push([i, j]);
                 }
                 return { vertices, edges };
             },
             pentachoron: () => {
-                const r = 1.5, d = 1.0/Math.sqrt(5);
-                const vertices = [new Vector4(r,r,r,-d), new Vector4(r,-r,-r,-d), new Vector4(-r,r,-r,-d), new Vector4(-r,-r,r,-d), new Vector4(0,0,0,r-d)];
-                const edges = []; for(let i=0;i<5;i++) for(let j=i+1;j<5;j++) edges.push([i,j]);
+                const r = 1.5, d = 1.0 / Math.sqrt(5);
+                const vertices = [new Vector4(r, r, r, -d), new Vector4(r, -r, -r, -d), new Vector4(-r, r, -r, -d), new Vector4(-r, -r, r, -d), new Vector4(0, 0, 0, r - d)];
+                const edges = []; for (let i = 0; i < 5; i++) for (let j = i + 1; j < 5; j++) edges.push([i, j]);
                 return { vertices, edges };
             },
             hexadecachoron: () => {
                 const vertices = [];
-                const p = [[1,0,0,0],[-1,0,0,0],[0,1,0,0],[0,-1,0,0],[0,0,1,0],[0,0,-1,0],[0,0,0,1],[0,0,0,-1]];
+                const p = [[1, 0, 0, 0], [-1, 0, 0, 0], [0, 1, 0, 0], [0, -1, 0, 0], [0, 0, 1, 0], [0, 0, -1, 0], [0, 0, 0, 1], [0, 0, 0, -1]];
                 p.forEach(v => vertices.push(new Vector4(...v)));
                 const edges = [];
-                for(let i=0;i<8;i++) for(let j=i+1;j<8;j++) if(Math.floor(i/2) !== Math.floor(j/2)) edges.push([i,j]);
+                for (let i = 0; i < 8; i++) for (let j = i + 1; j < 8; j++) if (Math.floor(i / 2) !== Math.floor(j / 2)) edges.push([i, j]);
                 return { vertices, edges };
             },
             icositetrachoron: () => {
                 const vertices = [];
-                [-1,0,1].forEach(x => [-1,0,1].forEach(y => [-1,0,1].forEach(z => [-1,0,1].forEach(w => {
-                    if(x*x+y*y+z*z+w*w===2) vertices.push(new Vector4(x,y,z,w));
+                [-1, 0, 1].forEach(x => [-1, 0, 1].forEach(y => [-1, 0, 1].forEach(z => [-1, 0, 1].forEach(w => {
+                    if (x * x + y * y + z * z + w * w === 2) vertices.push(new Vector4(x, y, z, w));
                 }))));
                 const edges = [];
-                for(let i=0;i<vertices.length;i++) for(let j=i+1;j<vertices.length;j++) {
-                     let d2 = Math.pow(vertices[i].x-vertices[j].x,2) + Math.pow(vertices[i].y-vertices[j].y,2) +
-                              Math.pow(vertices[i].z-vertices[j].z,2) + Math.pow(vertices[i].w-vertices[j].w,2);
-                     if(Math.abs(d2-2)<0.1) edges.push([i,j]);
+                for (let i = 0; i < vertices.length; i++) for (let j = i + 1; j < vertices.length; j++) {
+                    let d2 = Math.pow(vertices[i].x - vertices[j].x, 2) + Math.pow(vertices[i].y - vertices[j].y, 2) +
+                        Math.pow(vertices[i].z - vertices[j].z, 2) + Math.pow(vertices[i].w - vertices[j].w, 2);
+                    if (Math.abs(d2 - 2) < 0.1) edges.push([i, j]);
                 }
                 return { vertices, edges };
             },
-            duocylinder: (res=40) => {
+            duocylinder: (res = 40) => {
                 const vertices = [], edges = [];
-                for(let i=0;i<res;i++) {
-                    const u = i/res * Math.PI*2;
-                    for(let j=0;j<res;j++) {
-                        const v = j/res * Math.PI*2;
+                for (let i = 0; i < res; i++) {
+                    const u = i / res * Math.PI * 2;
+                    for (let j = 0; j < res; j++) {
+                        const v = j / res * Math.PI * 2;
                         vertices.push(new Vector4(Math.cos(u), Math.sin(u), Math.cos(v), Math.sin(v)));
                     }
                 }
-                for(let i=0;i<res;i++) for(let j=0;j<res;j++) {
-                    let idx = i*res+j;
-                    edges.push([idx, ((i+1)%res)*res+j]);
-                    edges.push([idx, i*res+((j+1)%res)]);
+                for (let i = 0; i < res; i++) for (let j = 0; j < res; j++) {
+                    let idx = i * res + j;
+                    edges.push([idx, ((i + 1) % res) * res + j]);
+                    edges.push([idx, i * res + ((j + 1) % res)]);
                 }
                 return { vertices, edges };
             },
@@ -131,17 +230,121 @@
                 const vertices = [], edges = [];
                 const r = 1;
                 const baseV = [
-                    new Vector4(r,r,r,-1), new Vector4(r,-r,-r,-1), 
-                    new Vector4(-r,r,-r,-1), new Vector4(-r,-r,r,-1)
+                    new Vector4(r, r, r, -1), new Vector4(r, -r, -r, -1),
+                    new Vector4(-r, r, -r, -1), new Vector4(-r, -r, r, -1)
                 ];
                 const baseV2 = baseV.map(v => new Vector4(v.x, v.y, v.z, 1));
                 vertices.push(...baseV, ...baseV2);
-                const baseEdges = [[0,1],[0,2],[0,3],[1,2],[1,3],[2,3]];
+                const baseEdges = [[0, 1], [0, 2], [0, 3], [1, 2], [1, 3], [2, 3]];
                 baseEdges.forEach(e => {
-                    edges.push(e); 
-                    edges.push([e[0]+4, e[1]+4]);
+                    edges.push(e);
+                    edges.push([e[0] + 4, e[1] + 4]);
                 });
-                for(let i=0;i<4;i++) edges.push([i, i+4]);
+                for (let i = 0; i < 4; i++) edges.push([i, i + 4]);
+                return { vertices, edges };
+            },
+            hexacosichoron: () => { // 600-cell
+                const phi = (1 + Math.sqrt(5)) / 2;
+                let rawVerts = [];
+
+                // 1. (±1/2, ±1/2, ±1/2, ±1/2) [16]
+                rawVerts.push(...getAllSigned([new Vector4(0.5, 0.5, 0.5, 0.5)]));
+
+                // 2. (±1, 0, 0, 0) perms [8]
+                const v2_base = [
+                    new Vector4(1, 0, 0, 0), new Vector4(0, 1, 0, 0), new Vector4(0, 0, 1, 0), new Vector4(0, 0, 0, 1)
+                ];
+                rawVerts.push(...getAllSigned(v2_base));
+
+                // 3. Even permutations of (±phi/2, ±1/2, ±1/2phi, 0) [96]
+                const v3 = new Vector4(phi / 2, 0.5, 0.5 / phi, 0);
+                const evenPerms = getEvenPermutations4([v3.x, v3.y, v3.z, v3.w]);
+                rawVerts.push(...getAllSigned(evenPerms));
+
+                const vertices = uniqueVertices(rawVerts); // Should be 120
+                // Edge length for unit radius = 1/phi
+                const edgeLen = 1.0 / phi;
+                const edges = createEdgesByDistance(vertices, edgeLen, 0.01);
+
+                return { vertices, edges };
+            },
+            hecatonicosachoron: () => { // 120-cell
+                const phi = (1 + Math.sqrt(5)) / 2;
+                const phi2 = phi * phi;
+                const r5 = Math.sqrt(5);
+                const invPhi = 1 / phi;
+                const invPhi2 = 1 / phi2;
+
+                let rawVerts = [];
+
+                // To scale similar to others, we divide everything by 2*sqrt(2) or just keep large and let camera handle?
+                // Let's keep original scale and normalize everything to radius ~2
+
+                // 1. (0, 0, ±2, ±2) perms [24]
+                const s1 = getEvenPermutations4([0, 0, 2, 2]); // Need all perms? (0,0,2,2) has 4!/2!2! = 6 perms. 
+                // Manual construct is safer for these specific sets
+                const s1_perms = [
+                    [0, 0, 2, 2], [0, 2, 0, 2], [0, 2, 2, 0], [2, 0, 0, 2], [2, 0, 2, 0], [2, 2, 0, 0]
+                ];
+                for (let p of s1_perms) rawVerts.push(...getAllSigned([new Vector4(...p)]));
+
+                // 2. (±1, ±1, ±1, ±√5) perms [64]
+                const s2 = getEvenPermutations4([1, 1, 1, r5]); // This only gives 12 perms. We need all 4 perms of position.
+                // (1,1,1,r5) -> (r5,1,1,1), (1,r5,1,1), (1,1,r5,1), (1,1,1,r5)
+                const s2_perms = [
+                    [1, 1, 1, r5], [1, 1, r5, 1], [1, r5, 1, 1], [r5, 1, 1, 1]
+                ];
+                for (let p of s2_perms) rawVerts.push(...getAllSigned([new Vector4(...p)]));
+
+                // 3. (±φ, ±φ, ±φ, ±φ⁻²) perms [64]
+                const s3_perms = [
+                    [phi, phi, phi, invPhi2], [phi, phi, invPhi2, phi], [phi, invPhi2, phi, phi], [invPhi2, phi, phi, phi]
+                ];
+                for (let p of s3_perms) rawVerts.push(...getAllSigned([new Vector4(...p)]));
+
+                // 4. (±φ⁻¹, ±φ⁻¹, ±φ⁻¹, ±φ²) perms [64]
+                const s4_perms = [
+                    [invPhi, invPhi, invPhi, phi2], [invPhi, invPhi, phi2, invPhi], [invPhi, phi2, invPhi, invPhi], [phi2, invPhi, invPhi, invPhi]
+                ];
+                for (let p of s4_perms) rawVerts.push(...getAllSigned([new Vector4(...p)]));
+
+                // 5. Even perms of (0, ±φ⁻², ±1, ±φ²) [96]
+                // 6. Even perms of (0, ±φ⁻¹, ±φ, ±√5) [96]
+                // 7. Even perms of (±φ⁻¹, ±1, ±φ, ±2) [192]
+
+                const sets = [
+                    [0, invPhi2, 1, phi2],
+                    [0, invPhi, phi, r5],
+                    [invPhi, 1, phi, 2]
+                ];
+
+                for (let s of sets) {
+                    const evenP = getEvenPermutations4(s);
+                    rawVerts.push(...getAllSigned(evenP));
+                }
+
+                let vertices = uniqueVertices(rawVerts);
+                // Normalize radius to match others (approx 1.0 - 2.0)
+                // 120-cell radius is sqrt(8) = 2.828.
+                // Scale down by 2
+                vertices.forEach(v => { v.x /= 2; v.y /= 2; v.z /= 2; v.w /= 2; });
+
+                // Edge length (after /2 scaling) calculated from (2,2,0,0)/2 = (1,1,0,0) and (phi, phi, phi, phi^-2)/2?
+                // Real edge length of unscaled is 2/phi^2 = 2 * (0.3819) = 0.76. 
+                // Wait, Wikipedia says edge length = 2/phi^2 * radius? 
+                // Let's rely on smallest distance between vertices.
+
+                // Find min distance
+                let minD2 = Infinity;
+                // Sample first vertex against others
+                const v0 = vertices[0];
+                for (let i = 1; i < vertices.length; i++) {
+                    const d2 = Math.pow(v0.x - vertices[i].x, 2) + Math.pow(v0.y - vertices[i].y, 2) + Math.pow(v0.z - vertices[i].z, 2) + Math.pow(v0.w - vertices[i].w, 2);
+                    if (d2 > 0.001 && d2 < minD2) minD2 = d2;
+                }
+                const edgeLen = Math.sqrt(minD2);
+
+                const edges = createEdgesByDistance(vertices, edgeLen, 0.05); // Tolerance needed
                 return { vertices, edges };
             }
         };
@@ -149,24 +352,24 @@
         // --- Three.js 初始化 ---
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x050505);
-        const camera = new THREE.PerspectiveCamera(45, window.innerWidth/window.innerHeight, 0.1, 100);
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
         camera.position.set(0, 2, 6);
-        
+
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(renderer.domElement);
-        
+
         const controls = new OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
 
         scene.add(new THREE.AmbientLight(0x404040));
-        const dl = new THREE.DirectionalLight(0xffffff, 2); dl.position.set(5,10,7); scene.add(dl);
-        const bl = new THREE.DirectionalLight(0x445566, 1.5); bl.position.set(-5,-5,-10); scene.add(bl);
+        const dl = new THREE.DirectionalLight(0xffffff, 2); dl.position.set(5, 10, 7); scene.add(dl);
+        const bl = new THREE.DirectionalLight(0x445566, 1.5); bl.position.set(-5, -5, -10); scene.add(bl);
 
         // 材质
         const projMaterial = new THREE.LineBasicMaterial({ color: 0x00aaff, transparent: true, opacity: 0.3 });
-        const sliceMat = new THREE.MeshPhysicalMaterial({ 
-            color: 0xff0055, metalness: 0.1, roughness: 0.1, transmission: 0.6, transparent: true, opacity: 0.8, side: THREE.DoubleSide 
+        const sliceMat = new THREE.MeshPhysicalMaterial({
+            color: 0xff0055, metalness: 0.1, roughness: 0.1, transmission: 0.6, transparent: true, opacity: 0.8, side: THREE.DoubleSide
         });
         const sliceWireMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.4 });
 
@@ -178,7 +381,7 @@
 
         let projMesh = new THREE.LineSegments(new THREE.BufferGeometry(), projMaterial);
         projectionGroup.add(projMesh);
-        
+
         let sliceMesh = new THREE.Mesh(new THREE.BufferGeometry(), sliceMat);
         let sliceWire = new THREE.LineSegments(new THREE.BufferGeometry(), sliceWireMat);
         sliceGroup.add(sliceMesh);
@@ -211,10 +414,17 @@
         // 存储每个面的控制状态
         const planeCtrls = {};
         rotationPlanes.forEach(p => {
+            let isAuto = false;
+            let spd = 0.01;
+
+            // 默认开启 XY 和 ZW 旋转
+            if (p === 'xy') { isAuto = true; spd = 0.01; }
+            if (p === 'zw') { isAuto = true; spd = 0.005; }
+
             planeCtrls[p] = {
                 angle: 0,
-                speed: 0.01,
-                auto: false,
+                speed: spd,
+                auto: isAuto,
                 guiAngle: null // 存储引用以便禁用/启用
             };
         });
@@ -223,7 +433,7 @@
         const gui = new GUI({ title: "控制面板", width: 340 });
 
         const fView = gui.addFolder('通用设置');
-        fView.add(params, 'shape', ['tesseract', 'duocylinder', 'tetraPrism', 'pentachoron', 'hexadecachoron', 'icositetrachoron']).name('几何体').onChange(initGeometry);
+        fView.add(params, 'shape', ['tesseract', 'duocylinder', 'tetraPrism', 'pentachoron', 'hexadecachoron', 'icositetrachoron', 'hexacosichoron', 'hecatonicosachoron']).name('几何体').onChange(initGeometry);
         fView.add(params, 'showProjection').name('显示投影');
         fView.add(params, 'showSlice').name('显示截面');
         fView.add(params, 'perspective', 0, 0.6).name('透视强度');
@@ -233,10 +443,10 @@
         // 构建 6 个平面的独立控制
         // 使用 "Rotation Tensor" 文件夹
         const fRot = gui.addFolder('角速度张量 (Rotation Tensor)');
-        
+
         rotationPlanes.forEach(plane => {
             const folder = fRot.addFolder(`${plane.toUpperCase()} 平面`);
-            
+
             // 1. 自动开关
             folder.add(planeCtrls[plane], 'auto').name('启用角速度 (Auto)').onChange(v => {
                 // 如果开启自动，禁用手动角度推杆，防止冲突
@@ -248,7 +458,12 @@
 
             // 3. 角度 (位置) - 增加 .listen() 以便自动旋转时更新 UI
             planeCtrls[plane].guiAngle = folder.add(planeCtrls[plane], 'angle', 0, Math.PI * 2).name('当前角度').listen().step(0.01);
-            
+
+            // 如果初始就是自动模式，则禁用角度推杆
+            if (planeCtrls[plane].auto) {
+                planeCtrls[plane].guiAngle.disable(true);
+            }
+
             folder.close(); // 默认折叠，保持整洁
         });
 
@@ -259,7 +474,7 @@
         }
 
         function update() {
-            if(!currentGeo) return;
+            if (!currentGeo) return;
 
             // --- 物理更新 (Physics Update) ---
             rotationPlanes.forEach(plane => {
@@ -269,13 +484,13 @@
                     ctrl.angle += ctrl.speed;
                     // 保持在 0-2PI 方便阅读
                     ctrl.angle = ctrl.angle % (Math.PI * 2);
-                    if(ctrl.angle < 0) ctrl.angle += Math.PI * 2;
+                    if (ctrl.angle < 0) ctrl.angle += Math.PI * 2;
                 }
             });
 
             // --- 顶点变换 ---
             const tVerts = currentGeo.vertices.map(v => v.clone());
-            
+
             // 依次应用6个平面的旋转矩阵
             // 注意：这就是将张量分量作用于向量。顺序虽然在数学上对大角度旋转有差异(非交换性)，
             // 但对于每帧微小增量的实时模拟，这种顺序应用是模拟 4D 旋转的标准且高效的方法。
@@ -287,22 +502,22 @@
             });
 
             // --- 投影渲染 ---
-            if(params.showProjection) {
+            if (params.showProjection) {
                 projectionGroup.visible = true;
                 const positions = [];
                 const strength = params.perspective;
-                
-                for(let edge of currentGeo.edges) {
+
+                for (let edge of currentGeo.edges) {
                     const v1 = tVerts[edge[0]];
                     const v2 = tVerts[edge[1]];
-                    
+
                     let s1 = 1, s2 = 1;
                     if (strength > 0.001) {
                         const d1 = 1 - v1.w * strength;
                         const d2 = 1 - v2.w * strength;
                         // 简单的裁剪保护
                         if (d1 < 0.1 || d2 < 0.1) {
-                             s1 = 0; s2 = 0; // 粗暴裁剪，防止飞线
+                            s1 = 0; s2 = 0; // 粗暴裁剪，防止飞线
                         } else {
                             s1 = 1 / d1; s2 = 1 / d2;
                         }
@@ -320,29 +535,29 @@
             }
 
             // --- 截面渲染 ---
-            if(params.showSlice) {
+            if (params.showSlice) {
                 sliceGroup.visible = true;
                 const points = [];
                 const wPlane = params.sliceW;
 
-                for(let edge of currentGeo.edges) {
+                for (let edge of currentGeo.edges) {
                     const v1 = tVerts[edge[0]];
                     const v2 = tVerts[edge[1]];
-                    
+
                     // 检查是否穿过截面
-                    if((v1.w >= wPlane && v2.w <= wPlane) || (v1.w <= wPlane && v2.w >= wPlane)) {
+                    if ((v1.w >= wPlane && v2.w <= wPlane) || (v1.w <= wPlane && v2.w >= wPlane)) {
                         const dist = v2.w - v1.w;
-                        if(Math.abs(dist) > 1e-6) {
+                        if (Math.abs(dist) > 1e-6) {
                             const t = (wPlane - v1.w) / dist;
-                            const x = v1.x + (v2.x - v1.x)*t;
-                            const y = v1.y + (v2.y - v1.y)*t;
-                            const z = v1.z + (v2.z - v1.z)*t;
-                            points.push(new THREE.Vector3(x,y,z));
+                            const x = v1.x + (v2.x - v1.x) * t;
+                            const y = v1.y + (v2.y - v1.y) * t;
+                            const z = v1.z + (v2.z - v1.z) * t;
+                            points.push(new THREE.Vector3(x, y, z));
                         }
                     }
                 }
 
-                if(points.length >= 4) {
+                if (points.length >= 4) {
                     try {
                         const geom = new ConvexGeometry(points);
                         sliceMesh.geometry.dispose();
@@ -351,7 +566,7 @@
                         sliceWire.geometry = new THREE.EdgesGeometry(geom);
                         sliceMesh.visible = true;
                         sliceWire.visible = true;
-                    } catch(e) {
+                    } catch (e) {
                         sliceMesh.visible = false; sliceWire.visible = false;
                     }
                 } else {
@@ -371,9 +586,10 @@
         }
         animate();
         window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth/window.innerHeight; camera.updateProjectionMatrix();
+            camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
         });
     </script>
 </body>
+
 </html>
