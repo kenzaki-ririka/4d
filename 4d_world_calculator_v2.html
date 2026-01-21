@@ -43,12 +43,9 @@ const FourDWorldCalculator = () => {
   const [sunRadius, setSunRadius] = useState(696000); // km (太阳真实值)
   
   // 粒子质量比：恒星平均粒子质量 / 行星平均粒子质量
-  // 三维真实值：太阳(氢氦,平均~2) / 地球(重元素,平均~25) ≈ 0.08
   const [particleMassRatio, setParticleMassRatio] = useState(0.08);
   
   // 粒子间距比：恒星粒子间距 / 行星粒子间距
-  // 三维真实值：从密度比0.256和粒子质量比0.08反推 = (0.08/0.256)^(1/3) ≈ 0.68
-  // 太阳虽是等离子体，但高压使间距反而更小
   const [particleSpacingRatio, setParticleSpacingRatio] = useState(0.68);
   
   // 目标质量比（用户可直接设置，会反推调整间距比）
@@ -60,22 +57,15 @@ const FourDWorldCalculator = () => {
   const [spacePerPersonSide, setSpacePerPersonSide] = useState(129); // 每人占空间的立方体边长 (m)，类比三维地球 129m×129m
 
   // 从粒子参数计算密度比
-  // 密度比 = 粒子质量比 / (间距比)^维度
-  // 三维：densityRatio3D = particleMassRatio / spacingRatio³
-  // 四维：densityRatio4D = particleMassRatio / spacingRatio⁴
   const densityRatio3D = particleMassRatio / Math.pow(particleSpacingRatio, 3);
   const densityRatio4D = particleMassRatio / Math.pow(particleSpacingRatio, 4);
   
   // 计算质量比
-  // 质量比 = 密度比 × (半径比)^维度
   const radiusRatio = sunRadius / planetRadius;
   const calculatedMassRatio3D = densityRatio3D * Math.pow(radiusRatio, 3);
   const calculatedMassRatio4D = densityRatio4D * Math.pow(radiusRatio, 4);
 
-  // 当用户调整目标质量比时，反推间距比（基于四维公式）
-  // 质量比 = (粒子质量比 / 间距比⁴) × 半径比⁴
-  // 间距比⁴ = 粒子质量比 × 半径比⁴ / 质量比
-  // 间距比 = (粒子质量比 × 半径比⁴ / 质量比)^(1/4)
+  // 当用户调整目标质量比时，反推间距比
   const handleMassRatioChange = (newMassRatio) => {
     setTargetMassRatio(newMassRatio);
     const newSpacingRatio = Math.pow(
@@ -87,10 +77,7 @@ const FourDWorldCalculator = () => {
     }
   };
 
-  // 自动计算太阳表面引力
-  // 三维和四维都满足：g ∝ ρR
-  // 所以 g_sun / g_planet = (ρ_sun / ρ_planet) × (R_sun / R_planet)
-  // 使用四维密度比
+  // 自动计算太阳表面引力 (g ∝ ρR)
   const sunSurfaceGravity = surfaceGravity * densityRatio4D * radiusRatio;
 
   const results = useMemo(() => {
@@ -128,25 +115,7 @@ const FourDWorldCalculator = () => {
     const g_moon_ratio = Math.pow(R / d_moon, 3);
 
     // 行星平衡温度计算
-    // 三维：T_p ∝ T_s × (R_s/r)^(1/2) = T_s × θ^(1/2)
-    // 四维：T_p ∝ T_s × (R_s/r)^(3/5) = T_s × θ^(3/5)
-    // 其中 θ = R_s / r ≈ tan(视角/2) ≈ 视角/2 (弧度)
-    const theta_rad = (sunAngularSize * Math.PI) / 180 / 2; // 半视角（弧度）
-    
-    // 地球的参数
-    const earth_theta = (0.53 * Math.PI) / 180 / 2;
-    const earth_temp = 255; // K (地球无大气平衡温度)
-    
-    // 三维行星温度（用于对比）
-    const planet_temp_3d = sunTemperature * Math.pow(theta_rad, 0.5);
-    
-    // 四维行星温度
-    // T_p = T_s × (R_s/r)^(3/5) 但需要考虑四维黑体辐射 T^5
-    // 能量平衡：吸收 = 辐射
-    // 吸收 ∝ (R_s/r)³ × T_s^5 × R_p³ (截面积是三维球)
-    // 辐射 ∝ T_p^5 × R_p³ (表面积是三维球面)
-    // 所以 T_p^5 ∝ (R_s/r)³ × T_s^5
-    // T_p = T_s × (R_s/r)^(3/5) = T_s × θ^(3/5)
+    // T_p = T_s × θ^(3/5)
     const planet_temp_4d = sunTemperature * Math.pow(theta_rad, 3/5);
 
     // 行星表面积（四维：S³ 表面积 = 2π²R³）
