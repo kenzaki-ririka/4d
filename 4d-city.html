@@ -663,8 +663,8 @@
         </div>
 
         <div class="control-row">
-          <label><span>道路裁剪</span><span id="val-roadPruneThreshold">2</span></label>
-          <input type="range" id="roadPruneThreshold" min="0" max="10" step="1" value="2">
+          <label><span>道路裁剪</span><span id="val-roadPruneThreshold">8</span></label>
+          <input type="range" id="roadPruneThreshold" min="0" max="10" step="1" value="8">
         </div>
 
 
@@ -1419,48 +1419,6 @@
       };
 
 
-      // ===== 步骤0：边界对接 (连接相邻区块的道路) =====
-      if (adjacentExits) {
-        const extLen = Math.min(6, roadSpacing); // 向内延伸长度
-
-        // -X方向 (连接到 x=0)
-        if (adjacentExits['-x']) {
-          for (const { y, z } of adjacentExits['-x']) {
-            for (let i = 0; i < extLen; i++) markRoad(i, y, z, true);
-          }
-        }
-        // +X方向 (连接到 x=gridSize-1)
-        if (adjacentExits['+x']) {
-          for (const { y, z } of adjacentExits['+x']) {
-            for (let i = 0; i < extLen; i++) markRoad(gridSize - 1 - i, y, z, true);
-          }
-        }
-        // -Y方向 (连接到 y=0)
-        if (adjacentExits['-y']) {
-          for (const { x, z } of adjacentExits['-y']) {
-            for (let i = 0; i < extLen; i++) markRoad(x, i, z, true);
-          }
-        }
-        // +Y方向 (连接到 y=gridSize-1)
-        if (adjacentExits['+y']) {
-          for (const { x, z } of adjacentExits['+y']) {
-            for (let i = 0; i < extLen; i++) markRoad(x, gridSize - 1 - i, z, true);
-          }
-        }
-        // -Z方向 (连接到 z=0)
-        if (adjacentExits['-z']) {
-          for (const { x, y } of adjacentExits['-z']) {
-            for (let i = 0; i < extLen; i++) markRoad(x, y, i, true);
-          }
-        }
-        // +Z方向 (连接到 z=gridSize-1)
-        if (adjacentExits['+z']) {
-          for (const { x, y } of adjacentExits['+z']) {
-            for (let i = 0; i < extLen; i++) markRoad(x, y, gridSize - 1 - i, true);
-          }
-        }
-      }
-
       // ===== 第一步：主干道随密度变化 =====
       for (let cx = 0; cx < gridSize; cx += roadSpacing) {
         for (let cy = 0; cy < gridSize; cy += roadSpacing) {
@@ -1802,18 +1760,12 @@
       // 检查每条主干道接触多少个建筑
       const toRemoveSegments = [];
       for (const segment of mainRoadSegments) {
-        let isBoundary = false;
         const touchedBuildings = new Set();
 
         for (const i of segment) {
           const x = i % gridSize;
           const y = Math.floor(i / gridSize) % gridSize;
           const z = Math.floor(i / (gridSize * gridSize));
-
-          // 属于边界的道路不裁剪（为了连接相邻区块）
-          if (x === 0 || x === gridSize - 1 || y === 0 || y === gridSize - 1 || z === 0 || z === gridSize - 1) {
-            isBoundary = true;
-          }
 
           // 检查6邻居
           for (const [dx, dy, dz] of dirs) {
@@ -1825,8 +1777,8 @@
           }
         }
 
-        // 如果接触 < 阈值且不是边界道路，则移除
-        if (!isBoundary && touchedBuildings.size < roadPruneThreshold) {
+        // 如果接触<阈值个建筑格子（太少），移除整条
+        if (touchedBuildings.size < roadPruneThreshold) {
           toRemoveSegments.push(segment);
         }
       }
@@ -3036,8 +2988,9 @@
 
       // 新区块使用当前全局params作为初始参数（深拷贝）
       const newBlockParams = JSON.parse(JSON.stringify(params));
-      // 保持种子不变，确保地形连续！
-      // newBlockParams.seed = params.seed + blocks.size * 1000;
+      // 为新区块生成不同的种子变化
+      //保证区块地形连续
+      //newBlockParams.seed = params.seed + blocks.size * 1000;
 
       const adjacentExits = getAdjacentExits(newKey);
       const blockData = generateCity(newBlockParams, newKey, adjacentExits);
@@ -3067,8 +3020,7 @@
       // 为每个新区块生成数据
       newBlockKeys.forEach(newKey => {
         const newBlockParams = JSON.parse(JSON.stringify(params));
-        // 保持种子不变，确保地形连续
-        // newBlockParams.seed = params.seed + blocks.size * 1000 + Math.random() * 100;
+        newBlockParams.seed = params.seed + blocks.size * 1000 + Math.random() * 100;
 
         const adjacentExits = getAdjacentExits(newKey);
         const blockData = generateCity(newBlockParams, newKey, adjacentExits);
