@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="zh">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>4D Simulation Collection</title>
+    <style>
+        :root {
+            --bg: #0a0a10;
+            --card-bg: #14141f;
+            --text-main: #e0e0e0;
+            --text-dim: #888;
+            --accent: #4af;
+            --hover: #222230;
+        }
+
+        body {
+            background: var(--bg);
+            color: var(--text-main);
+            font-family: system-ui, -apple-system, sans-serif;
+            margin: 0;
+            padding: 40px 20px;
+            line-height: 1.5;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        header {
+            margin-bottom: 60px;
+            text-align: center;
+        }
+
+        h1 {
+            font-weight: 200;
+            font-size: 2.5rem;
+            margin: 0 0 10px 0;
+            letter-spacing: 2px;
+        }
+
+        .subtitle {
+            color: var(--text-dim);
+            font-size: 0.9rem;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+        }
+
+        .card {
+            background: var(--card-bg);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            padding: 20px;
+            text-decoration: none;
+            color: inherit;
+            transition: all 0.2s ease;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .card:hover {
+            transform: translateY(-2px);
+            background: var(--hover);
+            border-color: rgba(255, 255, 255, 0.1);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+        }
+
+        .card-title {
+            font-size: 1.1rem;
+            font-weight: 500;
+            margin-bottom: 8px;
+            color: var(--accent);
+        }
+
+        .card-desc {
+            font-size: 0.85rem;
+            color: var(--text-dim);
+        }
+
+        .tag {
+            display: inline-block;
+            font-size: 0.7rem;
+            padding: 2px 6px;
+            border-radius: 4px;
+            background: rgba(255, 255, 255, 0.1);
+            color: #ccc;
+            margin-top: auto;
+            align-self: flex-start;
+            margin-top: 15px;
+        }
+
+        .tag.py {
+            background: rgba(255, 200, 80, 0.15);
+            color: #fc8;
+        }
+
+        .section-title {
+            margin-top: 40px;
+            margin-bottom: 20px;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-dim);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            padding-bottom: 10px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>4D SIMULATIONS</h1>
+            <div class="subtitle">Exploring High-Dimensional Concepts</div>
+        </header>
+
+        <div class="section-title">Web Applications</div>
+        <div class="grid">
+            <a href="4d-city.html" class="card">
+                <div class="card-title">4D City Generator</div>
+                <div class="card-desc">Procedural generation of a four-dimensional city with slices, road networks, and
+                    building zoning.</div>
+                <div class="tag">HTML5 / Canvas</div>
+            </a>
+
+            <a href="orbital_simulator_4d.html" class="card">
+                <div class="card-title">4D Orbital Simulator</div>
+                <div class="card-desc">Physics simulation of gravitational orbits in 4D space.</div>
+                <div class="tag">Physics</div>
+            </a>
+
+            <a href="4d_schedule_v2_runner.html" class="card">
+                <div class="card-title">4D World Scheduler</div>
+                <div class="card-desc">Day/Night cycle and calendar system for a double-rotating 4D planet.</div>
+                <div class="tag">Tool</div>
+            </a>
+
+            <a href="4d_world_calculator_v2.html" class="card">
+                <div class="card-title">World Parameter Calculator</div>
+                <div class="card-desc">Calculate physical constants, gravity, and scale for 4D worlds.</div>
+                <div class="tag">Tool</div>
+            </a>
+
+            <a href="orbital_simulator.html" class="card">
+                <div class="card-title">3D Orbital Simulator</div>
+                <div class="card-desc">Standard 3D orbital mechanics for comparison and reference.</div>
+                <div class="tag">Reference</div>
+            </a>
+
+            <a href="sun.html" class="card">
+                <div class="card-title">Sun Renderer</div>
+                <div class="card-desc">Standalone star rendering visualization.</div>
+                <div class="tag">Visual</div>
+            </a>
+        </div>
+
+        <div class="section-title">Local Scripts (Python)</div>
+        <div class="grid">
+            <a href="4d_flow.py" class="card" download>
+                <div class="card-title">4D Flow Simulation (.py)</div>
+                <div class="card-desc">
+                    Fluid dynamics simulation using Navier-Stokes equations in 4D.
+                    <br><br>
+                    <em>Note: This is a Python script. It requires NumPy and Matplotlib to run locally. Click to
+                        download.</em>
+                </div>
+                <div class="tag py">Python Source</div>
+            </a>
+        </div>
+    </div>
+</body>
+
+</html>

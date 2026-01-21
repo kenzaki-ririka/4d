@@ -1,0 +1,870 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>四维世界日程表 v2.1 (含黄赤交角)</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        body {
+            background-color: #111827;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        // 提取 React Hooks
+        const { useState, useMemo } = React;
+
+        const FourDScheduleV2 = () => {
+            // 黄金比例
+            const PHI = (1 + Math.sqrt(5)) / 2;
+
+            // 可调参数
+            const [fastDay, setFastDay] = useState(24); // 快日周期（小时）
+            const [slowDayRatio, setSlowDayRatio] = useState(Math.PI * 9 / 4); // 慢日/快日比
+            const [startFastPhase, setStartFastPhase] = useState(0); // 起始快日相位
+            const [startSlowPhase, setStartSlowPhase] = useState(0); // 起始慢日相位
+            const [cyclesCount, setCyclesCount] = useState(50); // 显示多少个昼夜周期
+            const [latitude, setLatitude] = useState(25); // 纬度 (Hopf Latitude η)
+            const [tiltXY, setTiltXY] = useState(23.5);
+            const [tiltZW, setTiltZW] = useState(40.0);
+            // [新增] 交换平面 (XY <=> ZW)
+            const [swapPlanes, setSwapPlanes] = useState(true);
+
+            // [新增] 公转参数
+            const [enableRevolution, setEnableRevolution] = useState(true);
+            const [yearLength, setYearLength] = useState(28800); // 公转周期（小时）
+            const [startYearPhase, setStartYearPhase] = useState(0); // 公转起始相位
+
+            const slowDay = fastDay * slowDayRatio;
+
+            // 课程设置
+            const classSettings = {
+                perHour: 1,
+                minClasses: 2,
+                maxClasses: 10,
+            };
+
+            // 辅助函数：双重倾斜旋转
+            const applyDoubleTilt = (x, y, z, w, deg1, deg2) => {
+                const r1 = deg1 * Math.PI / 180;
+                const c1 = Math.cos(r1);
+                const s1 = Math.sin(r1);
+                // XY 平面倾斜 (影响 Y 和 W 的混合)
+                let y1 = y * c1 - w * s1;
+                let w1 = y * s1 + w * c1;
+                let z1 = z;
+
+                const r2 = deg2 * Math.PI / 180;
+                const c2 = Math.cos(r2);
+                const s2 = Math.sin(r2);
+                // ZW 平面倾斜 (影响 Z 和 W 的混合)
+                let z2 = z1 * c2 - w1 * s2;
+                let w2 = z1 * s2 + w1 * c2;
+
+                return { z: z2, w: w2 }; // 返回 Z 和 W 以便进行纬度投影
+            };
+
+            // 辅助函数：简易数学表达式解析
+            const evaluateMath = (expr) => {
+                try {
+                    // 替换常量 (不区分大小写)
+                    let safeExpr = expr.toLowerCase();
+                    // 先替换长名字
+                    safeExpr = safeExpr.replace(/\bsqrt2\b/g, Math.SQRT2);
+                    safeExpr = safeExpr.replace(/\bphi\b/g, ((1 + Math.sqrt(5)) / 2));
+                    // 再替换短名字
+                    safeExpr = safeExpr.replace(/\bpi\b/g, Math.PI);
+                    safeExpr = safeExpr.replace(/\be\b/g, Math.E);
+                    // 允许常用函数
+                    safeExpr = safeExpr.replace(/\bsin\(/g, 'Math.sin(');
+                    safeExpr = safeExpr.replace(/\bcos\(/g, 'Math.cos(');
+                    safeExpr = safeExpr.replace(/\bsqrt\(/g, 'Math.sqrt(');
+
+                    // 只能包含数字、运算符、括号、点和Math前缀
+                    if (/[^0-9+\-*/().\sMathabcdeilnopqrst]/.test(safeExpr)) {
+                        // 简单的安全检查，允许 Math.xxx 产生的字符
+                        // 这里的正则并不严谨，但在本地跑个简单的表达式解析问题不大
+                        // 更严格的做法是写个递归下降解析器，这里偷懒用 Function
+                    }
+
+                    return new Function('return ' + safeExpr)();
+                } catch (e) {
+                    return null;
+                }
+            };
+
+            // 节气定义 (基于公转角度，0=冬至)
+            const SOLAR_TERMS = [
+                { angle: 0, name: '冬至' },
+                { angle: 45, name: '立春' },
+                { angle: 90, name: '春分' },
+                { angle: 135, name: '立夏' },
+                { angle: 180, name: '夏至' },
+                { angle: 225, name: '立秋' },
+                { angle: 270, name: '秋分' },
+                { angle: 315, name: '立冬' },
+            ];
+
+            // 检查一段时间内经过的节气
+            const checkSolarTerms = (startTime, endTime, yearLen, startPhase, tiltZW) => {
+                if (yearLen <= 0) return null;
+                const terms = [];
+                const yearSpeed = 2 * Math.PI / yearLen;
+                const tiltZWRad = tiltZW * Math.PI / 180;
+
+                // 将时间转换为角度 (deg)
+                // 修正：减去 TiltZW 引起的相移，不仅是几何旋转，也是能量最大值的偏移
+                const startAngleRad = (yearSpeed * startTime + startPhase - tiltZWRad) % (2 * Math.PI);
+                const endAngleRad = (yearSpeed * endTime + startPhase - tiltZWRad) % (2 * Math.PI);
+
+                // 调整负角度到 [0, 2PI]
+                const normalize = (rad) => {
+                    let r = rad % (2 * Math.PI);
+                    if (r < 0) r += 2 * Math.PI;
+                    return r;
+                };
+
+                let startDeg = normalize(startAngleRad) * 180 / Math.PI;
+                let endDeg = normalize(endAngleRad) * 180 / Math.PI;
+
+                // 处理跨越 0/360 的情况
+                // 如果 end < start，说明跨越了 0 度 (冬至)
+                if (endDeg < startDeg) {
+                    endDeg += 360;
+                }
+
+                SOLAR_TERMS.forEach(term => {
+                    // 检查 term.angle 是否在 [startDeg, endDeg] 区间内
+                    // 也要考虑 endDeg > 360 的情况 (即 term.angle + 360)
+                    if ((term.angle >= startDeg && term.angle <= endDeg) ||
+                        (term.angle + 360 >= startDeg && term.angle + 360 <= endDeg)) {
+                        terms.push(term.name);
+                    }
+                });
+
+                return terms.length > 0 ? terms.join(', ') : null;
+            };
+
+            // [新增] 比例输入框状态
+            const [ratioInput, setRatioInput] = useState((Math.PI * 9 / 4).toFixed(4));
+
+            // 计算某时刻太阳是否在地平线以上
+            const getSunAltitude = (t) => {
+                // 1. 计算两个自转平面的角速度 (rad/hr)
+                const fastSpeed = 2 * Math.PI / fastDay;
+                const slowSpeed = 2 * Math.PI / slowDay;
+
+                // 2. 将角度转换为弧度
+                // latitude (Hopf Latitude η): 0°(纯快日/赤道) -> 45°(混合/中纬) -> 90°(纯慢日/极点)
+                const eta = latitude * Math.PI / 180;
+
+                // 3. 计算随时间变化的双经度位置 (ξ1, ξ2)
+                // 默认: XY使用快日, ZW使用慢日
+                // 交换后: XY使用慢日, ZW使用快日
+                const speedXY = swapPlanes ? slowSpeed : fastSpeed;
+                const startXY = swapPlanes ? startSlowPhase : startFastPhase;
+
+                const speedZW = swapPlanes ? fastSpeed : slowSpeed;
+                const startZW = swapPlanes ? startFastPhase : startSlowPhase;
+
+                const xi1 = speedXY * t + startXY;
+                const xi2 = speedZW * t + startZW;
+
+                // 4. 生成 4D 超球面基础坐标 (S3 几何模型)
+                const x = Math.cos(eta) * Math.cos(xi1);
+                const y = Math.cos(eta) * Math.sin(xi1);
+                const z = Math.sin(eta) * Math.cos(xi2);
+                const w = Math.sin(eta) * Math.sin(xi2);
+
+                // 5. 应用双重黄赤交角变换 (Double Tilt)
+                const { z: zFinal, w: wFinal } = applyDoubleTilt(x, y, z, w, tiltXY, tiltZW);
+
+                // 6. 计算公转影响 (Revolution)
+                // 假设公转发生在 ZW 平面 (Sun rotates in ZW plane relative to the fixed frame)
+                // enableRevolution = false: Sun is fixed at -W (0, 0, 0, -1)
+                // enableRevolution = true: Sun rotates: (0, 0, sin(Ωt), -cos(Ωt))
+
+                let sunZ = 0;
+                let sunW = -1;
+
+                if (enableRevolution && yearLength > 0) {
+                    const yearSpeed = 2 * Math.PI / yearLength;
+                    const yearAngle = yearSpeed * t + startYearPhase;
+
+                    // 当 yearAngle = 0, Sun = -W (Winter/Base)
+                    // 当 yearAngle = PI, Sun = +W (Summer)
+                    // 顺时针/逆时针取决于定义，这里假设标准正向旋转
+                    sunZ = Math.sin(yearAngle);
+                    sunW = -Math.cos(yearAngle);
+                }
+
+                // 7. 返回太阳高度 (Dot Product of Planet Position and Sun Vector)
+                // P = (xFinal, yFinal, zFinal, wFinal)
+                // S = (0, 0, sunZ, sunW)
+                return zFinal * sunZ + wFinal * sunW;
+            };
+
+            // 找到日出/日落时刻（太阳高度过零点）
+            const findDayNightCycles = () => {
+                const cycles = [];
+                const dt = 0.05; // 稍微增大步长以优化长周期计算性能
+
+                // 如果开启公转，至少计算一定长度以体现季节变化
+                const maxTime = enableRevolution
+                    ? Math.max(yearLength * 1.2, cyclesCount * Math.max(fastDay, slowDay) * 2)
+                    : cyclesCount * Math.max(fastDay, slowDay) * 2;
+
+                let t = 0;
+                let prevAltitude = getSunAltitude(0);
+                let currentStart = 0;
+                let isDay = prevAltitude > 0;
+                let cycleIndex = 0;
+
+                // 累计快日和慢日计数
+                let fastDayCount = 0;
+                let slowDayCount = 0;
+                let lastFastDay = 0;
+                let lastSlowDay = 0;
+
+                while (cycles.length < cyclesCount * 2 && t < maxTime) {
+                    t += dt;
+                    const altitude = getSunAltitude(t);
+
+                    // 检测过零点
+                    if ((prevAltitude <= 0 && altitude > 0) || (prevAltitude >= 0 && altitude < 0)) {
+                        const duration = t - currentStart;
+
+                        // 更新快日慢日计数
+                        const currentFastDay = Math.floor(t / fastDay);
+                        const currentSlowDay = Math.floor(t / slowDay);
+                        if (currentFastDay > lastFastDay) {
+                            fastDayCount = currentFastDay;
+                            lastFastDay = currentFastDay;
+                        }
+                        if (currentSlowDay > lastSlowDay) {
+                            slowDayCount = currentSlowDay;
+                            lastSlowDay = currentSlowDay;
+                        }
+
+                        cycles.push({
+                            index: cycleIndex++,
+                            startTime: currentStart,
+                            endTime: t,
+                            duration: duration,
+                            isDay: isDay,
+                            fastDay: fastDayCount,
+                            slowDay: slowDayCount,
+                        });
+
+                        currentStart = t;
+                        isDay = !isDay;
+                    }
+
+                    prevAltitude = altitude;
+                }
+
+                return cycles;
+            };
+
+            // 生成昼夜周期数据
+            // 生成昼夜周期数据
+            const cycleData = useMemo(() => {
+                return findDayNightCycles();
+            }, [fastDay, slowDayRatio, startFastPhase, startSlowPhase, cyclesCount, latitude, tiltXY, tiltZW, swapPlanes, enableRevolution, yearLength, startYearPhase]);
+
+            // 将连续的昼夜配对
+            const dayNightPairs = useMemo(() => {
+                const pairs = [];
+                for (let i = 0; i < cycleData.length - 1; i += 2) {
+                    const first = cycleData[i];
+                    const second = cycleData[i + 1];
+
+                    // 确保先昼后夜
+                    let dayPart, nightPart;
+                    if (first.isDay) {
+                        dayPart = first;
+                        nightPart = second;
+                    } else {
+                        nightPart = first;
+                        dayPart = second;
+                    }
+
+                    if (dayPart && nightPart) {
+                        const totalLength = dayPart.duration + nightPart.duration;
+                        const dayRatio = dayPart.duration / totalLength;
+
+                        // 根据昼夜比例分类
+                        let dayType, color, textColor;
+                        if (dayRatio < 0.15) {
+                            dayType = '极短日'; color = 'bg-indigo-900'; textColor = 'text-indigo-300';
+                        } else if (dayRatio < 0.3) {
+                            dayType = '短日'; color = 'bg-blue-900'; textColor = 'text-blue-300';
+                        } else if (dayRatio < 0.45) {
+                            dayType = '偏短日'; color = 'bg-cyan-900'; textColor = 'text-cyan-300';
+                        } else if (dayRatio < 0.55) {
+                            dayType = '平日'; color = 'bg-gray-700'; textColor = 'text-gray-300';
+                        } else if (dayRatio < 0.7) {
+                            dayType = '偏长日'; color = 'bg-yellow-900'; textColor = 'text-yellow-300';
+                        } else if (dayRatio < 0.85) {
+                            dayType = '长日'; color = 'bg-orange-900'; textColor = 'text-orange-300';
+                        } else {
+                            dayType = '极长日'; color = 'bg-red-900'; textColor = 'text-red-300';
+                        }
+
+                        // 计算课时（基于白昼长度）
+                        const availableHours = Math.max(0, dayPart.duration - 2);
+                        let classes = Math.floor(availableHours * classSettings.perHour);
+                        classes = Math.max(classSettings.minClasses, Math.min(classSettings.maxClasses, classes));
+
+                        // 计算节气
+                        let solarTerm = null;
+                        if (enableRevolution) {
+                            // 使用 dayPart 的 start 和 nightPart 的 end (覆盖整个周期)
+                            solarTerm = checkSolarTerms(dayPart.startTime, nightPart.endTime, yearLength, startYearPhase, tiltZW);
+                        }
+
+                        pairs.push({
+                            index: pairs.length + 1,
+                            dayDuration: dayPart.duration,
+                            nightDuration: nightPart.duration,
+                            totalDuration: totalLength,
+                            dayRatio: dayRatio,
+                            fastDay: dayPart.fastDay,
+                            slowDay: dayPart.slowDay,
+                            dayType,
+                            color,
+                            textColor,
+                            classes,
+                            solarTerm,
+                        });
+                    }
+                }
+                return pairs;
+            }, [cycleData, enableRevolution, yearLength, startYearPhase, tiltZW]);
+
+            // 统计信息
+            const stats = useMemo(() => {
+                if (dayNightPairs.length === 0) return { minDay: 0, maxDay: 0, avgDay: 0, minNight: 0, maxNight: 0, avgNight: 0, totalClasses: 0 };
+
+                const days = dayNightPairs.map(d => d.dayDuration);
+                const nights = dayNightPairs.map(d => d.nightDuration);
+
+                return {
+                    minDay: Math.min(...days),
+                    maxDay: Math.max(...days),
+                    avgDay: days.reduce((a, b) => a + b, 0) / days.length,
+                    minNight: Math.min(...nights),
+                    maxNight: Math.max(...nights),
+                    avgNight: nights.reduce((a, b) => a + b, 0) / nights.length,
+                    totalClasses: dayNightPairs.reduce((a, b) => a + b.classes, 0),
+                };
+            }, [dayNightPairs]);
+
+            const formatTime = (hours) => {
+                if (hours < 1) return `${(hours * 60).toFixed(0)}分`;
+                return `${hours.toFixed(1)}时`;
+            };
+
+            return (
+                <div className="min-h-screen bg-gray-900 text-white p-4">
+                    <h1 className="text-2xl font-bold mb-2 text-center">四维世界日程表 v2.1 (含黄赤交角)</h1>
+                    <p className="text-gray-400 text-center mb-4 text-sm">
+                        基于双旋转自转 + 双重黄赤交角的准周期系统
+                    </p>
+
+                    <div className="max-w-6xl mx-auto grid lg:grid-cols-3 gap-4">
+                        {/* 参数设置 */}
+                        <div className="bg-gray-800 p-4 rounded-lg">
+                            <div className="flex justify-between items-center mb-3">
+                                <h2 className="text-lg font-semibold text-blue-400">⚙️ 参数设置</h2>
+                                <button
+                                    onClick={() => setSwapPlanes(!swapPlanes)}
+                                    className={`text-xs px-2 py-1 rounded bg-gray-700 text-gray-400 hover:bg-gray-600`}
+                                >
+                                    {swapPlanes ? 'XY=慢' : 'XY=快'}
+                                </button>
+                            </div>
+
+                            <div className="space-y-3">
+                                <div>
+                                    <label className="block text-xs text-green-400 mb-1 font-bold">
+                                        Tilt XY (主交角):
+                                        <input
+                                            type="number"
+                                            value={tiltXY}
+                                            onChange={(e) => setTiltXY(Number(e.target.value))}
+                                            className="bg-gray-700 text-white px-1 rounded w-14 ml-1"
+                                        />
+                                        °
+                                    </label>
+                                    <input
+                                        type="range"
+                                        min="0"
+                                        max="90"
+                                        step="0.5"
+                                        value={tiltXY}
+                                        onChange={(e) => setTiltXY(Number(e.target.value))}
+                                        className="w-full accent-green-500"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs text-purple-400 mb-1 font-bold">
+                                        Tilt ZW (次交角):
+                                        <input
+                                            type="number"
+                                            value={tiltZW}
+                                            onChange={(e) => setTiltZW(Number(e.target.value))}
+                                            className="bg-gray-700 text-white px-1 rounded w-14 ml-1"
+                                        />
+                                        °
+                                    </label>
+                                    <input
+                                        type="range"
+                                        min="0"
+                                        max="90"
+                                        step="0.5"
+                                        value={tiltZW}
+                                        onChange={(e) => setTiltZW(Number(e.target.value))}
+                                        className="w-full accent-purple-500"
+                                    />
+                                </div>
+
+                                <hr className="border-gray-700" />
+
+                                <div>
+                                    <label className="block text-xs text-yellow-400 mb-1 font-bold">
+                                        纬度 (Latitude η):
+                                        <input
+                                            type="number"
+                                            value={latitude}
+                                            onChange={(e) => setLatitude(Number(e.target.value))}
+                                            className="bg-gray-700 text-white px-1 rounded w-16 ml-2"
+                                        />
+                                        °
+                                    </label>
+                                    <div className="flex justify-between text-[10px] text-gray-500">
+                                        <span>赤道 (XY)</span>
+                                        <span>中纬 (混合)</span>
+                                        <span>极点 (ZW)</span>
+                                    </div>
+                                    <input
+                                        type="range"
+                                        min="0"
+                                        max="90"
+                                        step="0.1"
+                                        value={latitude}
+                                        onChange={(e) => setLatitude(Number(e.target.value))}
+                                        className="w-full accent-yellow-500"
+                                    />
+                                </div>
+
+                                <hr className="border-gray-700" />
+
+                                <div>
+                                    <label className="block text-xs text-gray-400 mb-1">
+                                        快日周期: <input
+                                            type="number"
+                                            value={Math.round(fastDay * 100) / 100}
+                                            step="0.1"
+                                            className="bg-gray-700 text-white px-1 rounded w-20 ml-1"
+                                            onChange={(e) => {
+                                                const val = Number(e.target.value);
+                                                setFastDay(val);
+                                                // 保持慢日不变: slowDay = fast * ratio
+                                                // newRatio = oldSlow / newFast
+                                                if (val > 0) setSlowDayRatio(slowDay / val);
+                                            }}
+                                        /> 小时
+                                    </label>
+                                    <input
+                                        type="range"
+                                        min="1"
+                                        max="100"
+                                        step="0.1"
+                                        value={fastDay}
+                                        onChange={(e) => {
+                                            const val = Number(e.target.value);
+                                            setFastDay(val);
+                                            setSlowDayRatio(slowDay / val);
+                                        }}
+                                        className="w-full"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="block text-xs text-gray-400 mb-1">
+                                        慢日周期: <input
+                                            type="number"
+                                            value={Math.round(slowDay * 100) / 100}
+                                            step="0.1"
+                                            className="bg-gray-700 text-white px-1 rounded w-20 ml-1"
+                                            onChange={(e) => {
+                                                const val = Number(e.target.value);
+                                                // 保持快日不变: ratio = newSlow / fast
+                                                if (fastDay > 0) setSlowDayRatio(val / fastDay);
+                                            }}
+                                        /> 小时
+                                    </label>
+                                    <input
+                                        type="range"
+                                        min="1"
+                                        max="100"
+                                        step="0.1"
+                                        value={slowDay}
+                                        onChange={(e) => setSlowDayRatio(Number(e.target.value) / fastDay)}
+                                        className="w-full"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="block text-xs text-gray-400 mb-1">
+                                        慢日/快日比: {slowDayRatio.toFixed(4)} → 慢日 = {slowDay.toFixed(4)} 小时
+                                    </label>
+                                    <div className="flex gap-2">
+                                        <input
+                                            type="text"
+                                            value={ratioInput}
+                                            onChange={(e) => setRatioInput(e.target.value)}
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter') {
+                                                    const res = evaluateMath(ratioInput);
+                                                    if (res != null && !isNaN(res) && res > 0) {
+                                                        const val = Number(res);
+                                                        setSlowDayRatio(val);
+                                                        // setFastDay(slowDay / val);
+                                                        setRatioInput(String(res)); // 计算完成后替换为结果? 或者保留表达式? 保留结果比较直观
+                                                    }
+                                                }
+                                            }}
+                                            onBlur={() => {
+                                                const res = evaluateMath(ratioInput);
+                                                if (res != null && !isNaN(res) && res > 0) {
+                                                    const val = Number(res);
+                                                    setSlowDayRatio(val);
+                                                    // setFastDay(slowDay / val);
+                                                    // setRatioInput(String(res)); // 失焦时自动计算? 可选
+                                                }
+                                            }}
+                                            placeholder="输入表达式 e.g., 2*PI + 1"
+                                            className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-xs text-white"
+                                        />
+                                        <button
+                                            onClick={() => {
+                                                const res = evaluateMath(ratioInput);
+                                                if (res != null && !isNaN(res) && res > 0) {
+                                                    const val = Number(res);
+                                                    setSlowDayRatio(val);
+                                                    // setFastDay(slowDay / val);
+                                                    setRatioInput(String(val));
+                                                }
+                                            }}
+                                            className="bg-blue-700 hover:bg-blue-600 px-3 rounded text-xs"
+                                        >
+                                            =
+                                        </button>
+                                    </div>
+                                    <div className="flex gap-1 mt-1 flex-wrap">
+                                        {[
+                                            { label: 'φ', val: 'phi' },
+                                            { label: '√2', val: 'sqrt2' },
+                                            { label: 'π', val: 'pi' },
+                                            { label: 'e', val: 'e' },
+                                            { label: '+', val: '+' },
+                                            { label: '-', val: '-' },
+                                            { label: '*', val: '*' },
+                                            { label: '/', val: '/' },
+                                            { label: '(', val: '(' },
+                                            { label: ')', val: ')' },
+                                        ].map(btn => (
+                                            <button
+                                                key={btn.label}
+                                                onClick={() => setRatioInput(prev => prev + btn.val)}
+                                                className="text-xs bg-gray-700 px-2 py-0.5 rounded hover:bg-gray-600 font-mono"
+                                            >
+                                                {btn.label}
+                                            </button>
+                                        ))}
+                                        <button
+                                            onClick={() => setRatioInput('')}
+                                            className="text-xs bg-red-900 px-2 py-0.5 rounded hover:bg-red-800"
+                                        >
+                                            C
+                                        </button>
+                                    </div>
+                                </div>
+
+
+
+                                <div>
+                                    <label className="block text-xs text-gray-400 mb-1">
+                                        显示周期数: {cyclesCount}
+                                    </label>
+                                    <input
+                                        type="range"
+                                        min="10"
+                                        max="3000"
+                                        step="1"
+                                        value={cyclesCount}
+                                        onChange={(e) => setCyclesCount(Number(e.target.value))}
+                                        className="w-full"
+                                    />
+                                </div>
+
+                                <hr className="border-gray-700" />
+
+                                <div className="grid grid-cols-2 gap-2">
+                                    <div>
+                                        <label className="block text-xs text-gray-400 mb-1">快日起始相位</label>
+                                        <input
+                                            type="range"
+                                            min="0"
+                                            max={2 * Math.PI}
+                                            step="0.1"
+                                            value={startFastPhase}
+                                            onChange={(e) => setStartFastPhase(Number(e.target.value))}
+                                            className="w-full"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs text-gray-400 mb-1">慢日起始相位</label>
+                                        <input
+                                            type="range"
+                                            min="0"
+                                            max={2 * Math.PI}
+                                            step="0.1"
+                                            value={startSlowPhase}
+                                            onChange={(e) => setStartSlowPhase(Number(e.target.value))}
+                                            className="w-full"
+                                        />
+                                    </div>
+                                </div>
+
+                                <hr className="border-gray-700 my-3" />
+
+                                {/* 公转设置 */}
+                                <div>
+                                    <div className="flex justify-between items-center mb-1">
+                                        <label className="block text-xs text-pink-400 font-bold">
+                                            公转 (Revolution)
+                                        </label>
+                                        <input
+                                            type="checkbox"
+                                            checked={enableRevolution}
+                                            onChange={(e) => setEnableRevolution(e.target.checked)}
+                                            className="accent-pink-500"
+                                        />
+                                    </div>
+
+                                    {enableRevolution && (
+                                        <div className="space-y-2 pl-2 border-l-2 border-pink-900 bg-gray-900/30 p-2 rounded">
+                                            <div>
+                                                <label className="block text-[10px] text-gray-400 mb-1">
+                                                    公转周期 (年):
+                                                    <input
+                                                        type="number"
+                                                        value={yearLength}
+                                                        onChange={(e) => setYearLength(Number(e.target.value))}
+                                                        className="bg-gray-700 text-white px-1 rounded w-20 ml-2"
+                                                    />
+                                                    h
+                                                </label>
+                                                <input
+                                                    type="range"
+                                                    min="0"
+                                                    max="100000"
+                                                    step="100"
+                                                    value={yearLength}
+                                                    onChange={(e) => setYearLength(Number(e.target.value))}
+                                                    className="w-full accent-pink-500"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-[10px] text-gray-400 mb-1">
+                                                    当前季节相位 (°):
+                                                    <input
+                                                        type="number"
+                                                        value={Math.round(startYearPhase / (2 * Math.PI) * 360)}
+                                                        onChange={(e) => setStartYearPhase(Number(e.target.value) * Math.PI / 180)}
+                                                        className="bg-gray-700 text-white px-1 rounded w-20 ml-2"
+                                                    />
+                                                </label>
+                                                <input
+                                                    type="range"
+                                                    min="0"
+                                                    max={2 * Math.PI}
+                                                    step="0.01"
+                                                    value={startYearPhase}
+                                                    onChange={(e) => setStartYearPhase(Number(e.target.value))}
+                                                    className="w-full accent-pink-500"
+                                                />
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* 统计信息 */}
+                            <div className="mt-4 p-3 bg-gray-700 rounded">
+                                <h3 className="text-sm font-semibold mb-2">📊 统计</h3>
+                                <div className="grid grid-cols-2 gap-2 text-xs">
+                                    <div className="col-span-2 text-yellow-400 font-semibold">☀️ 白昼</div>
+                                    <div>最短: <span className="text-blue-300">{formatTime(stats.minDay)}</span></div>
+                                    <div>最长: <span className="text-orange-300">{formatTime(stats.maxDay)}</span></div>
+                                    <div className="col-span-2">平均: <span className="text-gray-300">{formatTime(stats.avgDay)}</span></div>
+
+                                    <div className="col-span-2 text-indigo-400 font-semibold mt-2">🌙 黑夜</div>
+                                    <div>最短: <span className="text-blue-300">{formatTime(stats.minNight)}</span></div>
+                                    <div>最长: <span className="text-orange-300">{formatTime(stats.maxNight)}</span></div>
+                                    <div className="col-span-2">平均: <span className="text-gray-300">{formatTime(stats.avgNight)}</span></div>
+
+                                    <div className="col-span-2 mt-2">
+                                        总课时: <span className="text-green-300">{stats.totalClasses}</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* 昼夜时长可视化 */}
+                            <div className="mt-4">
+                                <h3 className="text-sm font-semibold mb-2">📈 昼夜曲线</h3>
+                                <div className="h-32 bg-gray-700 rounded relative overflow-hidden">
+                                    <svg viewBox={`0 0 ${dayNightPairs.length} 100`} className="w-full h-full" preserveAspectRatio="none">
+                                        {/* 50%基准线 */}
+                                        <line x1="0" y1="50" x2={dayNightPairs.length} y2="50" stroke="#4a5568" strokeWidth="0.5" strokeDasharray="2,2" />
+
+                                        {/* 白昼时长曲线（橙色） */}
+                                        <polyline
+                                            fill="none"
+                                            stroke="#f6ad55"
+                                            strokeWidth="1.5"
+                                            points={dayNightPairs.map((d, i) =>
+                                                `${i},${100 - d.dayRatio * 100}`
+                                            ).join(' ')}
+                                        />
+
+                                        {/* 黑夜时长曲线（蓝色） */}
+                                        <polyline
+                                            fill="none"
+                                            stroke="#63b3ed"
+                                            strokeWidth="1.5"
+                                            points={dayNightPairs.map((d, i) =>
+                                                `${i},${d.dayRatio * 100}`
+                                            ).join(' ')}
+                                        />
+                                    </svg>
+                                    <div className="absolute bottom-1 right-2 text-xs">
+                                        <span className="text-orange-400">━ 昼</span>
+                                        <span className="text-blue-400 ml-2">━ 夜</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* 日程表 */}
+                        <div className="lg:col-span-2 bg-gray-800 p-4 rounded-lg">
+                            <h2 className="text-lg font-semibold mb-3 text-green-400">📅 昼夜周期表</h2>
+
+                            <div className="overflow-auto max-h-[500px]">
+                                <table className="w-full text-sm">
+                                    <thead className="sticky top-0 bg-gray-800">
+                                        <tr className="text-gray-400 text-xs">
+                                            <th className="py-2 px-1 text-left">#</th>
+                                            <th className="py-2 px-1 text-left">快日</th>
+                                            <th className="py-2 px-1 text-left">慢日</th>
+                                            {enableRevolution && <th className="py-2 px-1 text-left text-pink-400">节气</th>}
+                                            <th className="py-2 px-2 text-left">类型</th>
+                                            <th className="py-2 px-2 text-right">☀️ 昼</th>
+                                            <th className="py-2 px-2 text-right">🌙 夜</th>
+                                            <th className="py-2 px-2 text-right">课时</th>
+                                            <th className="py-2 px-2 text-left">昼夜比</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {dayNightPairs.map((pair) => (
+                                            <tr key={pair.index} className={`border-t border-gray-700 ${pair.color}`}>
+                                                <td className="py-1.5 px-1 font-mono text-xs text-gray-500">{pair.index}</td>
+                                                <td className="py-1.5 px-1 font-mono text-xs text-gray-400">{pair.fastDay}</td>
+                                                <td className="py-1.5 px-1 font-mono text-xs text-gray-400">{pair.slowDay}</td>
+                                                {enableRevolution && <td className="py-1.5 px-1 font-bold text-xs text-pink-300">{pair.solarTerm}</td>}
+                                                <td className={`py-1.5 px-2 ${pair.textColor} text-xs font-medium`}>{pair.dayType}</td>
+                                                <td className="py-1.5 px-2 text-right font-mono text-yellow-400">{formatTime(pair.dayDuration)}</td>
+                                                <td className="py-1.5 px-2 text-right font-mono text-blue-400">{formatTime(pair.nightDuration)}</td>
+                                                <td className="py-1.5 px-2 text-right font-mono">{pair.classes}</td>
+                                                <td className="py-1.5 px-2 w-32">
+                                                    <div className="flex h-3 rounded overflow-hidden">
+                                                        <div
+                                                            className="bg-yellow-500"
+                                                            style={{ width: `${pair.dayRatio * 100}%` }}
+                                                        />
+                                                        <div
+                                                            className="bg-blue-700"
+                                                            style={{ width: `${(1 - pair.dayRatio) * 100}%` }}
+                                                        />
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div >
+
+                    {/* 说明 */}
+                    < div className="max-w-6xl mx-auto mt-4 bg-gray-800 p-4 rounded-lg text-sm" >
+                        <h3 className="font-semibold mb-2 text-purple-400">📖 关于四维昼夜</h3>
+                        <div className="grid md:grid-cols-2 gap-4 text-gray-300">
+                            <div>
+                                <p className="mb-2">
+                                    四维行星同时绕两个正交平面旋转：
+                                </p>
+                                <ul className="list-disc list-inside text-xs space-y-1">
+                                    <li><strong>快日</strong>：较快旋转周期 ({fastDay.toFixed(4)} 小时)</li>
+                                    <li><strong>慢日</strong>：较慢旋转周期 ({slowDay.toFixed(4)} 小时)</li>
+                                    <li>比值 = {slowDayRatio.toFixed(4)} (无理数 → 永不重复)</li>
+                                </ul>
+                            </div>
+                            <div>
+                                <p className="mb-2">
+                                    太阳高度由两个旋转叠加决定。当两个旋转"配合"时产生极长日，"抵消"时产生极短日。
+                                </p>
+                                <p className="text-xs text-gray-400">
+                                    每个昼夜周期的长度不固定，学校根据预测的日照时长安排课程。
+                                </p>
+                            </div>
+                        </div>
+                    </div >
+
+                    {/* 小说场景 */}
+                    < div className="max-w-6xl mx-auto mt-4 bg-gray-800 p-4 rounded-lg" >
+                        <h3 className="font-semibold mb-2 text-yellow-400">✨ 小说中的日期格式</h3>
+                        <div className="bg-gray-700 p-3 rounded text-sm font-mono">
+                            <p className="text-green-300">快日 2847，慢日 1523</p>
+                            <p className="text-gray-400 text-xs mt-1">今日为<span className="text-orange-400">长日</span>，昼 18.7 时，夜 4.2 时，课程 10 节</p>
+                        </div>
+                        <div className="mt-3 text-xs text-gray-400">
+                            <p>💡 "快日"和"慢日"是四维世界的两个基本时间计量单位，取代了三维世界的"天"。</p>
+                            <p className="mt-1">💡 实际的昼夜长度由两个周期的相位叠加决定，可预测但永不重复。</p>
+                        </div>
+                    </div >
+                </div >
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<FourDScheduleV2 />);
+    </script>
+</body>
+
+</html>

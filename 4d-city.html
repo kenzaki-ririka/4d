@@ -1,0 +1,3374 @@
+<!DOCTYPE html>
+<html lang="zh">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>四维城市生成器</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      background: #08080f;
+      overflow: hidden;
+      font-family: system-ui, sans-serif;
+    }
+
+    #canvas-container {
+      position: fixed;
+      inset: 0;
+      cursor: grab;
+    }
+
+    .panel {
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      background: rgba(8, 8, 18, 0.92);
+      backdrop-filter: blur(8px);
+      border-radius: 5px;
+      padding: 8px 10px;
+      font-size: 10px;
+      color: #999;
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      user-select: none;
+    }
+
+    .panel.collapsed {
+      padding: 5px 8px;
+    }
+
+    .panel-header {
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .panel-header .arrow {
+      font-size: 8px;
+      opacity: 0.4;
+    }
+
+    .panel-header .title {
+      font-weight: 500;
+      font-size: 10px;
+    }
+
+    .panel-content {
+      margin-top: 8px;
+      display: flex;
+      gap: 12px;
+    }
+
+    .panel-content.hidden {
+      display: none;
+    }
+
+    .panel-column {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      min-width: 130px;
+    }
+
+    .toggle-group {
+      display: flex;
+      gap: 4px;
+    }
+
+    .toggle-btn {
+      flex: 1;
+      padding: 3px;
+      background: rgba(255, 255, 255, 0.05);
+      border: none;
+      border-radius: 3px;
+      color: #555;
+      font-size: 8px;
+      cursor: pointer;
+    }
+
+    .toggle-btn.active {
+      background: rgba(100, 150, 255, 0.25);
+      color: #8af;
+    }
+
+    .control-row label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 9px;
+      color: #aaa;
+      margin-bottom: 2px;
+    }
+
+    .control-row input[type="range"] {
+      width: 100%;
+      height: 3px;
+      background: #333;
+      border-radius: 2px;
+      outline: none;
+      cursor: pointer;
+      -webkit-appearance: none;
+    }
+
+    .control-row input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 10px;
+      height: 10px;
+      background: #888;
+      border-radius: 50%;
+      cursor: pointer;
+    }
+
+    .curve-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 2px;
+    }
+
+    .curve-btn {
+      flex: 1 0 45%;
+      padding: 2px 4px;
+      background: rgba(255, 255, 255, 0.05);
+      border: none;
+      border-radius: 2px;
+      color: #555;
+      font-size: 8px;
+      cursor: pointer;
+    }
+
+    .curve-btn.active {
+      background: rgba(100, 150, 255, 0.25);
+      color: #8af;
+    }
+
+    .mode-group {
+      display: flex;
+      gap: 2px;
+      margin-bottom: 4px;
+    }
+
+    .mode-btn {
+      flex: 1;
+      padding: 2px 3px;
+      background: rgba(255, 255, 255, 0.05);
+      border: none;
+      border-radius: 2px;
+      color: #555;
+      font-size: 7px;
+      cursor: pointer;
+    }
+
+    .mode-btn.active {
+      background: rgba(100, 200, 150, 0.3);
+      color: #8da;
+    }
+
+    .mode-params {
+      display: none;
+    }
+
+    .mode-params.visible {
+      display: block;
+    }
+
+    .section-label {
+      font-size: 8px;
+      color: #556;
+      text-align: center;
+      padding: 2px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      margin-bottom: 3px;
+    }
+
+    .type-filter {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 2px;
+      margin-bottom: 4px;
+    }
+
+    .type-btn {
+      padding: 2px 4px;
+      background: rgba(255, 255, 255, 0.05);
+      border: none;
+      border-radius: 2px;
+      font-size: 7px;
+      cursor: pointer;
+      opacity: 0.5;
+    }
+
+    .type-btn.active {
+      opacity: 1;
+    }
+
+    .type-btn[data-type="commercial"] {
+      color: #4af;
+    }
+
+    .type-btn[data-type="residential"] {
+      color: #8c8;
+    }
+
+    .type-btn[data-type="industrial"] {
+      color: #aa8;
+    }
+
+    .type-btn[data-type="public"] {
+      color: #c8f;
+    }
+
+    .type-btn[data-type="landmark"] {
+      color: #fa4;
+    }
+
+    .type-btn.active[data-type="commercial"] {
+      background: rgba(68, 170, 255, 0.25);
+    }
+
+    .type-btn.active[data-type="residential"] {
+      background: rgba(136, 204, 136, 0.25);
+    }
+
+    .type-btn.active[data-type="industrial"] {
+      background: rgba(170, 170, 136, 0.25);
+    }
+
+    .type-btn.active[data-type="public"] {
+      background: rgba(204, 136, 255, 0.25);
+    }
+
+    .type-btn.active[data-type="landmark"] {
+      background: rgba(255, 170, 68, 0.25);
+    }
+
+    .random-btn {
+      padding: 3px;
+      background: rgba(255, 255, 255, 0.08);
+      border: none;
+      border-radius: 3px;
+      color: #777;
+      font-size: 8px;
+      cursor: pointer;
+      margin-top: 2px;
+    }
+
+    .info-br {
+      position: fixed;
+      bottom: 10px;
+      right: 10px;
+      font-size: 8px;
+      color: rgba(255, 255, 255, 0.2);
+      text-align: right;
+      line-height: 1.4;
+    }
+
+    .info-bl {
+      position: fixed;
+      bottom: 10px;
+      left: 10px;
+      font-size: 8px;
+      color: rgba(255, 255, 255, 0.35);
+      line-height: 1.5;
+    }
+
+    .info-bl .red {
+      color: #e44;
+    }
+
+    .info-bl .green {
+      color: #4a4;
+    }
+
+    .info-bl .blue {
+      color: #68f;
+    }
+
+    .legend {
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      background: rgba(8, 8, 18, 0.9);
+      backdrop-filter: blur(8px);
+      border-radius: 5px;
+      padding: 8px 10px;
+      font-size: 9px;
+      color: #999;
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      display: none;
+    }
+
+    .legend.visible {
+      display: block;
+    }
+
+    .legend-title {
+      font-size: 8px;
+      color: #666;
+      margin-bottom: 6px;
+      text-align: center;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin: 3px 0;
+    }
+
+    .legend-color {
+      width: 12px;
+      height: 12px;
+      border-radius: 2px;
+    }
+
+    .legend-label {
+      font-size: 9px;
+      color: #aaa;
+    }
+
+    /* 导出导入按钮 */
+    .io-buttons {
+      display: flex;
+      gap: 4px;
+      margin-top: 4px;
+    }
+
+    .io-btn {
+      flex: 1;
+      padding: 3px;
+      background: rgba(255, 255, 255, 0.08);
+      border: none;
+      border-radius: 3px;
+      color: #777;
+      font-size: 7px;
+      cursor: pointer;
+    }
+
+    .io-btn:hover {
+      background: rgba(255, 255, 255, 0.12);
+      color: #aaa;
+    }
+
+    /* 区块扩展控件 */
+    .block-controls {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      margin-bottom: 6px;
+    }
+
+    .block-row {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 3px;
+    }
+
+    .block-btn {
+      width: 28px;
+      height: 22px;
+      padding: 0;
+      background: rgba(100, 180, 255, 0.15);
+      border: 1px solid rgba(100, 180, 255, 0.3);
+      border-radius: 3px;
+      color: #6af;
+      font-size: 8px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .block-btn:hover {
+      background: rgba(100, 180, 255, 0.3);
+      border-color: rgba(100, 180, 255, 0.5);
+      color: #fff;
+    }
+
+    .block-btn.exists {
+      background: rgba(100, 255, 150, 0.2);
+      border-color: rgba(100, 255, 150, 0.4);
+      color: #8fa;
+      cursor: default;
+    }
+
+    .block-mode-toggle {
+      display: flex;
+      gap: 3px;
+      margin-bottom: 6px;
+    }
+
+    .block-mode-btn {
+      flex: 1;
+      padding: 3px 4px;
+      background: rgba(100, 180, 255, 0.1);
+      border: 1px solid rgba(100, 180, 255, 0.2);
+      border-radius: 3px;
+      color: #68a;
+      font-size: 7px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .block-mode-btn.active {
+      background: rgba(100, 180, 255, 0.25);
+      border-color: rgba(100, 180, 255, 0.5);
+      color: #8cf;
+    }
+
+    .block-select-btn {
+      width: 28px;
+      height: 22px;
+      padding: 0;
+      background: rgba(255, 200, 100, 0.15);
+      border: 1px solid rgba(255, 200, 100, 0.3);
+      border-radius: 3px;
+      color: #fa5;
+      font-size: 10px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .block-select-btn:hover {
+      background: rgba(255, 200, 100, 0.3);
+      border-color: rgba(255, 200, 100, 0.5);
+    }
+
+    .block-select-btn.active {
+      background: rgba(100, 255, 150, 0.25);
+      border-color: rgba(100, 255, 150, 0.5);
+      color: #8f8;
+    }
+
+    .block-action-row {
+      display: flex;
+      gap: 3px;
+      margin-top: 4px;
+    }
+
+    .block-action-btn {
+      flex: 1;
+      padding: 4px 2px;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 3px;
+      color: #777;
+      font-size: 7px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .block-action-btn:hover {
+      background: rgba(255, 255, 255, 0.12);
+      color: #aaa;
+    }
+
+    .block-action-btn:nth-child(2) {
+      background: rgba(255, 100, 100, 0.1);
+      border-color: rgba(255, 100, 100, 0.2);
+      color: #f88;
+    }
+
+    .block-action-btn:nth-child(2):hover {
+      background: rgba(255, 100, 100, 0.2);
+    }
+
+    .block-action-btn.apply-btn {
+      background: rgba(100, 255, 180, 0.15);
+      border-color: rgba(100, 255, 180, 0.3);
+      color: #8fc;
+    }
+
+    .block-action-btn.apply-btn:hover {
+      background: rgba(100, 255, 180, 0.25);
+    }
+
+    .block-action-btn.load-btn {
+      background: rgba(180, 150, 255, 0.15);
+      border-color: rgba(180, 150, 255, 0.3);
+      color: #c9f;
+    }
+
+    .block-action-btn.load-btn:hover {
+      background: rgba(180, 150, 255, 0.25);
+    }
+
+    /* 建筑编辑面板 */
+    .edit-panel {
+      position: fixed;
+      bottom: 50px;
+      right: 10px;
+      background: rgba(8, 8, 18, 0.95);
+      backdrop-filter: blur(8px);
+      border-radius: 5px;
+      padding: 10px 12px;
+      font-size: 9px;
+      color: #999;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      min-width: 180px;
+      display: none;
+    }
+
+    .edit-panel.visible {
+      display: block;
+    }
+
+    .edit-panel-title {
+      font-size: 10px;
+      color: #8af;
+      margin-bottom: 8px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .edit-panel-close {
+      background: none;
+      border: none;
+      color: #666;
+      cursor: pointer;
+      font-size: 12px;
+    }
+
+    .edit-panel-close:hover {
+      color: #e55;
+    }
+
+    .edit-row {
+      margin: 6px 0;
+    }
+
+    .edit-row label {
+      display: block;
+      font-size: 8px;
+      color: #666;
+      margin-bottom: 2px;
+    }
+
+    .edit-row input,
+    .edit-row select,
+    .edit-row textarea {
+      width: 100%;
+      padding: 4px 6px;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 3px;
+      color: #ccc;
+      font-size: 9px;
+      font-family: inherit;
+    }
+
+    .edit-row textarea {
+      resize: vertical;
+      min-height: 40px;
+    }
+
+    .edit-row input:focus,
+    .edit-row select:focus,
+    .edit-row textarea:focus {
+      outline: none;
+      border-color: rgba(100, 150, 255, 0.4);
+    }
+
+    .edit-info {
+      font-size: 8px;
+      color: #555;
+      margin-top: 8px;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="canvas-container"></div>
+
+  <div class="panel" id="panel">
+    <div class="panel-header" id="panel-header">
+      <span class="arrow" id="arrow">▼</span>
+      <span class="title">4D City</span>
+    </div>
+    <div class="panel-content" id="panel-content">
+      <!-- 左列：基础参数 -->
+      <div class="panel-column">
+        <div class="toggle-group">
+          <button class="toggle-btn active" id="btn-buildings">建筑</button>
+          <button class="toggle-btn" id="btn-roads">道路</button>
+          <button class="toggle-btn" id="btn-lakes">湖泊</button>
+          <button class="toggle-btn" id="btn-mountains">山脉</button>
+        </div>
+
+        <div class="control-row">
+          <label><span>着色</span></label>
+          <div class="mode-group" id="color-mode-group">
+            <button class="mode-btn active" data-mode="height">W高度</button>
+            <button class="mode-btn" data-mode="type">类型</button>
+          </div>
+        </div>
+
+        <div class="control-row">
+          <label><span>类型筛选</span></label>
+          <div class="type-filter" id="type-filter">
+            <button class="type-btn active" data-type="commercial">商</button>
+            <button class="type-btn active" data-type="residential">住</button>
+            <button class="type-btn active" data-type="industrial">工</button>
+            <button class="type-btn active" data-type="public">公</button>
+            <button class="type-btn active" data-type="landmark">标</button>
+            <button class="type-btn active" data-type="mountain" style="color:#6d6;">山</button>
+          </div>
+        </div>
+
+        <div class="section-label">─ 道路 ─</div>
+
+        <div class="control-row">
+          <label><span>主干道间距</span><span id="val-roadSpacing">8</span></label>
+          <input type="range" id="roadSpacing" min="4" max="16" step="1" value="8">
+        </div>
+
+        <div class="control-row">
+          <label><span>主干道宽</span><span id="val-roadWidth">1</span></label>
+          <input type="range" id="roadWidth" min="1" max="3" step="1" value="1">
+        </div>
+
+        <div class="control-row">
+          <label><span>主干道偏移</span><span id="val-roadOffset">2</span></label>
+          <input type="range" id="roadOffset" min="0" max="5" step="1" value="2">
+        </div>
+
+        <div class="control-row">
+          <label><span>主干道密度</span><span id="val-roadDensity">50%</span></label>
+          <input type="range" id="roadDensity" min="0.1" max="1" step="0.01" value="0.5">
+        </div>
+
+        <div class="control-row">
+          <label><span>支路密度</span><span id="val-branchDensity">15%</span></label>
+          <input type="range" id="branchDensity" min="0" max="0.5" step="0.01" value="0.15">
+        </div>
+
+        <div class="control-row">
+          <label><span>支路分叉率</span><span id="val-branchFork">15%</span></label>
+          <input type="range" id="branchFork" min="0" max="0.5" step="0.01" value="0.15">
+        </div>
+
+        <div class="control-row">
+          <label><span>支路最大长</span><span id="val-branchMaxLen">12</span></label>
+          <input type="range" id="branchMaxLen" min="3" max="30" step="1" value="12">
+        </div>
+
+        <div class="control-row">
+          <label><span>小路最大长</span><span id="val-alleyMaxLen">6</span></label>
+          <input type="range" id="alleyMaxLen" min="1" max="15" step="1" value="6">
+        </div>
+
+        <div class="control-row">
+          <label><span>道路裁剪</span><span id="val-roadPruneThreshold">2</span></label>
+          <input type="range" id="roadPruneThreshold" min="0" max="10" step="1" value="2">
+        </div>
+
+
+        <div class="section-label">─ 其他 ─</div>
+
+        <div class="control-row">
+          <label><span>建筑尺寸</span><span id="val-buildingSize">1-4</span></label>
+          <input type="range" id="buildingSize" min="1" max="8" step="1" value="4">
+        </div>
+
+        <div class="control-row">
+          <label><span>透明度(建)</span><span id="val-opacityBuilding">100%</span></label>
+          <input type="range" id="opacityBuilding" min="0.1" max="1" step="0.05" value="1.0">
+        </div>
+        <div class="control-row">
+          <label><span>透明度(路)</span><span id="val-opacityRoad">80%</span></label>
+          <input type="range" id="opacityRoad" min="0.1" max="1" step="0.05" value="0.8">
+        </div>
+        <div class="control-row">
+          <label><span>透明度(湖)</span><span id="val-opacityLake">100%</span></label>
+          <input type="range" id="opacityLake" min="0.1" max="1" step="0.05" value="1.0">
+        </div>
+        <div class="control-row">
+          <label><span>透明度(山)</span><span id="val-opacityMountain">60%</span></label>
+          <input type="range" id="opacityMountain" min="0.1" max="1" step="0.05" value="0.6">
+        </div>
+
+        <button class="random-btn" id="random-btn">随机</button>
+        <div class="io-buttons">
+          <button class="io-btn" id="btn-export">导出</button>
+          <button class="io-btn" id="btn-import">导入</button>
+        </div>
+        <input type="file" id="import-file" accept=".json" style="display:none">
+
+        <div class="section-label">─ 区块管理 ─</div>
+        <div style="display:flex; justify-content:space-between; font-size:10px; margin-bottom:4px;">
+          <span id="block-info" style="color:#8af;">共 1 区块</span>
+          <span id="selected-block-info" style="color:#fa5;">选中: 全局</span>
+        </div>
+        <div class="block-mode-toggle">
+          <button class="block-mode-btn active" id="btn-mode-extend">单向延伸</button>
+          <button class="block-mode-btn" id="btn-mode-expand">批量扩展</button>
+        </div>
+        <div class="block-controls">
+          <div class="block-row">
+            <button class="block-btn" data-dir="-y" title="向-Y">-Y</button>
+            <button class="block-btn" data-dir="-z" title="向-Z">-Z</button>
+            <button class="block-btn" data-dir="+z" title="向+Z">+Z</button>
+            <button class="block-btn" data-dir="+y" title="向+Y">+Y</button>
+          </div>
+          <div class="block-row">
+            <button class="block-btn" data-dir="-x" title="向-X">-X</button>
+            <button class="block-select-btn" id="btn-select-block" title="选中区块(点击建筑)">●</button>
+            <button class="block-btn" data-dir="+x" title="向+X">+X</button>
+          </div>
+        </div>
+        <div class="block-action-row">
+          <button class="block-action-btn apply-btn" id="btn-apply-params" title="将当前面板参数应用到选中区块">应用参数</button>
+          <button class="block-action-btn load-btn" id="btn-load-params" title="从选中区块加载参数到面板">加载参数</button>
+        </div>
+        <div class="block-action-row">
+          <button class="block-action-btn" id="btn-regen-block" title="重新生成选中区块">重生成</button>
+        </div>
+        <div class="block-action-row">
+          <button class="block-action-btn" id="btn-delete-block" title="删除选中区块">删除</button>
+          <button class="block-action-btn" id="btn-clear-blocks" title="清除所有扩展">清除</button>
+        </div>
+      </div>
+
+      <!-- 右列：密度和W高度 -->
+      <div class="panel-column">
+        <div class="control-row">
+          <label><span>种子</span><span id="val-seed">42</span></label>
+          <input type="range" id="seed" min="1" max="9999" step="1" value="42">
+        </div>
+
+        <div class="control-row">
+          <label><span>网格</span><span id="val-gridSize">36³</span></label>
+          <input type="range" id="gridSize" min="12" max="56" step="1" value="36">
+        </div>
+
+        <div class="section-label">─ 湖泊 ─</div>
+
+        <div class="control-row">
+          <label><span>湖泊阈值</span><span id="val-lakeThreshold">20%</span></label>
+          <input type="range" id="lakeThreshold" min="0" max="0.6" step="0.01" value="0.20">
+        </div>
+
+        <div class="control-row">
+          <label><span>湖泊尺度</span><span id="val-lakeScale">0.04</span></label>
+          <input type="range" id="lakeScale" min="0" max="0.5" step="0.01" value="0.04">
+        </div>
+
+        <div class="section-label">─ 山脉 ─</div>
+
+        <div class="control-row">
+          <label><span>山脉阈值</span><span id="val-mountainThreshold">30%</span></label>
+          <input type="range" id="mountainThreshold" min="0" max="0.6" step="0.01" value="0.30">
+        </div>
+
+        <div class="control-row">
+          <label><span>山脉尺度</span><span id="val-mountainScale">0.03</span></label>
+          <input type="range" id="mountainScale" min="0" max="0.5" step="0.01" value="0.03">
+        </div>
+
+        <div class="control-row">
+          <label><span>山脉密度</span><span id="val-mountainDensity">20%</span></label>
+          <input type="range" id="mountainDensity" min="0" max="1" step="0.01" value="0.20">
+        </div>
+
+        <div class="section-label">─ 建筑密度 ─</div>
+        <div class="mode-group" id="density-mode-group">
+          <button class="mode-btn active" data-mode="radial">辐射</button>
+          <button class="mode-btn" data-mode="noise">噪声</button>
+          <button class="mode-btn" data-mode="uniform">均匀</button>
+        </div>
+
+        <!-- 辐射模式参数 -->
+        <div class="mode-params visible" id="density-radial-params">
+          <div class="control-row">
+            <label><span>中心密度</span><span id="val-centerDensity">85.0%</span></label>
+            <input type="range" id="centerDensity" min="0" max="1" step="0.005" value="0.85">
+          </div>
+          <div class="control-row">
+            <label><span>边缘密度</span><span id="val-edgeDensity">0.5%</span></label>
+            <input type="range" id="edgeDensity" min="0" max="1" step="0.005" value="0.005">
+          </div>
+          <div class="control-row">
+            <label><span>曲线</span></label>
+            <div class="curve-group" id="density-curves">
+              <button class="curve-btn" data-curve="linear">线性</button>
+              <button class="curve-btn active" data-curve="gaussian">高斯</button>
+              <button class="curve-btn" data-curve="sigmoid">S型</button>
+              <button class="curve-btn" data-curve="plateau">平台</button>
+            </div>
+          </div>
+          <div class="control-row">
+            <label><span>σ</span><span id="val-densitySigma">0.20</span></label>
+            <input type="range" id="densitySigma" min="0.05" max="1" step="0.01" value="0.20">
+          </div>
+        </div>
+
+        <!-- 噪声模式参数 -->
+        <div class="mode-params" id="density-noise-params">
+          <div class="control-row">
+            <label><span>覆盖率</span><span id="val-densityNoiseThreshold">40%</span></label>
+            <input type="range" id="densityNoiseThreshold" min="0.1" max="0.8" step="0.01" value="0.4">
+          </div>
+          <div class="control-row">
+            <label><span>团簇尺度</span><span id="val-densityNoiseScale">0.08</span></label>
+            <input type="range" id="densityNoiseScale" min="0.02" max="0.25" step="0.005" value="0.08">
+          </div>
+          <div class="control-row">
+            <label><span>团簇密度</span><span id="val-densityNoiseMax">90%</span></label>
+            <input type="range" id="densityNoiseMax" min="0.3" max="1" step="0.01" value="0.9">
+          </div>
+          <div class="control-row">
+            <label><span>空地密度</span><span id="val-densityNoiseMin">0.0%</span></label>
+            <input type="range" id="densityNoiseMin" min="0" max="0.5" step="0.005" value="0">
+          </div>
+        </div>
+
+        <!-- 均匀模式参数 -->
+        <div class="mode-params" id="density-uniform-params">
+          <div class="control-row">
+            <label><span>固定密度</span><span id="val-densityUniform">50%</span></label>
+            <input type="range" id="densityUniform" min="0.1" max="1" step="0.01" value="0.5">
+          </div>
+        </div>
+
+        <div class="section-label">─ W高度 ─</div>
+        <div class="mode-group" id="w-mode-group">
+          <button class="mode-btn active" data-mode="radial">辐射</button>
+          <button class="mode-btn" data-mode="noise">噪声</button>
+          <button class="mode-btn" data-mode="uniform">均匀</button>
+        </div>
+
+        <!-- 辐射模式参数 -->
+        <div class="mode-params visible" id="w-radial-params">
+          <div class="control-row">
+            <label><span>中心W高</span><span id="val-centerW">100%</span></label>
+            <input type="range" id="centerW" min="0" max="1" step="0.01" value="1">
+          </div>
+          <div class="control-row">
+            <label><span>边缘W高</span><span id="val-edgeW">0%</span></label>
+            <input type="range" id="edgeW" min="0" max="1" step="0.01" value="0">
+          </div>
+          <div class="control-row">
+            <label><span>曲线</span></label>
+            <div class="curve-group" id="w-curves">
+              <button class="curve-btn" data-curve="linear">线性</button>
+              <button class="curve-btn active" data-curve="gaussian">高斯</button>
+              <button class="curve-btn" data-curve="sigmoid">S型</button>
+              <button class="curve-btn" data-curve="plateau">平台</button>
+            </div>
+          </div>
+          <div class="control-row">
+            <label><span>σ</span><span id="val-wSigma">0.40</span></label>
+            <input type="range" id="wSigma" min="0.05" max="1" step="0.01" value="0.4">
+          </div>
+        </div>
+
+        <!-- 噪声模式参数 -->
+        <div class="mode-params" id="w-noise-params">
+          <div class="control-row">
+            <label><span>噪声尺度</span><span id="val-wNoiseScale">0.12</span></label>
+            <input type="range" id="wNoiseScale" min="0.03" max="0.4" step="0.01" value="0.12">
+          </div>
+          <div class="control-row">
+            <label><span>W偏移</span><span id="val-wNoiseOffset">50%</span></label>
+            <input type="range" id="wNoiseOffset" min="0" max="1" step="0.01" value="0.5">
+          </div>
+          <div class="control-row">
+            <label><span>W振幅</span><span id="val-wNoiseAmplitude">50%</span></label>
+            <input type="range" id="wNoiseAmplitude" min="0.1" max="1" step="0.01" value="0.5">
+          </div>
+        </div>
+
+        <!-- 均匀模式参数 -->
+        <div class="mode-params" id="w-uniform-params">
+          <div class="control-row">
+            <label><span>固定W高</span><span id="val-wUniform">50%</span></label>
+            <input type="range" id="wUniform" min="0" max="1" step="0.01" value="0.5">
+          </div>
+        </div>
+
+        <div class="control-row">
+          <label><span>W随机扰动</span><span id="val-wNoise">30%</span></label>
+          <input type="range" id="wNoise" min="0" max="0.8" step="0.01" value="0.3">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="legend" id="legend">
+    <div class="legend-title">公共建筑子类型</div>
+    <div class="legend-item">
+      <div class="legend-color" style="background: hsl(280, 40%, 50%)"></div><span class="legend-label">政府</span>
+    </div>
+    <div class="legend-item">
+      <div class="legend-color" style="background: hsl(0, 70%, 50%)"></div><span class="legend-label">医院</span>
+    </div>
+    <div class="legend-item">
+      <div class="legend-color" style="background: hsl(43, 80%, 50%)"></div><span class="legend-label">学校</span>
+    </div>
+    <div class="legend-item">
+      <div class="legend-color" style="background: hsl(234, 50%, 50%)"></div><span class="legend-label">图书馆</span>
+    </div>
+    <div class="legend-item">
+      <div class="legend-color" style="background: hsl(29, 60%, 50%)"></div><span class="legend-label">博物馆</span>
+    </div>
+    <div class="legend-item">
+      <div class="legend-color" style="background: hsl(151, 70%, 50%)"></div><span class="legend-label">体育馆</span>
+    </div>
+    <div class="legend-item">
+      <div class="legend-color" style="background: hsl(331, 70%, 50%)"></div><span class="legend-label">剧院</span>
+    </div>
+    <div class="legend-item">
+      <div class="legend-color" style="background: hsl(198, 40%, 50%)"></div><span class="legend-label">车站</span>
+    </div>
+  </div>
+
+  <div class="edit-panel" id="edit-panel">
+    <div class="edit-panel-title">
+      <span>编辑建筑</span>
+      <button class="edit-panel-close" id="edit-close">×</button>
+    </div>
+    <div class="edit-row">
+      <label>类型</label>
+      <select id="edit-type">
+        <option value="commercial">商业</option>
+        <option value="residential">住宅</option>
+        <option value="industrial">工业</option>
+        <option value="public">公共</option>
+        <option value="landmark">地标</option>
+        <option value="mountain">山地</option>
+      </select>
+    </div>
+    <div class="edit-row">
+      <label>子类型</label>
+      <select id="edit-subtype"></select>
+    </div>
+    <div class="edit-row">
+      <label>名称</label>
+      <input type="text" id="edit-name" placeholder="如：市第一中学">
+    </div>
+    <div class="edit-row">
+      <label>备注</label>
+      <textarea id="edit-note" placeholder="额外说明..."></textarea>
+    </div>
+    <div class="edit-info">
+      位置: <span id="edit-pos">-</span><br>
+      尺寸: <span id="edit-size">-</span>
+    </div>
+  </div>
+
+  <div class="info-br">
+    <div id="stats">0 建筑</div>
+    <div>drag · scroll</div>
+  </div>
+
+  <!-- <div class="info-bl">
+    W高度: <span class="red">红=高</span> <span class="green">绿=低</span> · <span class="blue">蓝=湖泊</span> · 灰=道路
+  </div> -->
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script>
+    // ===== 伪随机数生成器 =====
+    class SeededRNG {
+      constructor(seed) { this.seed = seed; }
+      next() {
+        const x = Math.sin(this.seed++) * 10000;
+        return x - Math.floor(x);
+      }
+      nextInt(min, max) {
+        return Math.floor(this.next() * (max - min + 1)) + min;
+      }
+    }
+
+    // ===== 3D Perlin 噪声 (简化实现) =====
+    class PerlinNoise3D {
+      constructor(seed = 0) {
+        this.perm = new Uint8Array(512);
+        const rng = new SeededRNG(seed);
+        // 生成排列表
+        const p = new Uint8Array(256);
+        for (let i = 0; i < 256; i++) p[i] = i;
+        // Fisher-Yates 洗牌
+        for (let i = 255; i > 0; i--) {
+          const j = Math.floor(rng.next() * (i + 1));
+          [p[i], p[j]] = [p[j], p[i]];
+        }
+        for (let i = 0; i < 512; i++) this.perm[i] = p[i & 255];
+      }
+
+      fade(t) { return t * t * t * (t * (t * 6 - 15) + 10); }
+      lerp(a, b, t) { return a + t * (b - a); }
+
+      grad(hash, x, y, z) {
+        const h = hash & 15;
+        const u = h < 8 ? x : y;
+        const v = h < 4 ? y : (h === 12 || h === 14 ? x : z);
+        return ((h & 1) === 0 ? u : -u) + ((h & 2) === 0 ? v : -v);
+      }
+
+      noise(x, y, z) {
+        const X = Math.floor(x) & 255;
+        const Y = Math.floor(y) & 255;
+        const Z = Math.floor(z) & 255;
+
+        x -= Math.floor(x);
+        y -= Math.floor(y);
+        z -= Math.floor(z);
+
+        const u = this.fade(x);
+        const v = this.fade(y);
+        const w = this.fade(z);
+
+        const p = this.perm;
+        const A = p[X] + Y, AA = p[A] + Z, AB = p[A + 1] + Z;
+        const B = p[X + 1] + Y, BA = p[B] + Z, BB = p[B + 1] + Z;
+
+        return this.lerp(
+          this.lerp(
+            this.lerp(this.grad(p[AA], x, y, z), this.grad(p[BA], x - 1, y, z), u),
+            this.lerp(this.grad(p[AB], x, y - 1, z), this.grad(p[BB], x - 1, y - 1, z), u),
+            v
+          ),
+          this.lerp(
+            this.lerp(this.grad(p[AA + 1], x, y, z - 1), this.grad(p[BA + 1], x - 1, y, z - 1), u),
+            this.lerp(this.grad(p[AB + 1], x, y - 1, z - 1), this.grad(p[BB + 1], x - 1, y - 1, z - 1), u),
+            v
+          ),
+          w
+        );
+      }
+
+      // 分形噪声 (FBM) - 多层叠加使形状更自然
+      fbm(x, y, z, octaves = 3) {
+        let value = 0, amplitude = 1, frequency = 1, maxValue = 0;
+        for (let i = 0; i < octaves; i++) {
+          value += amplitude * this.noise(x * frequency, y * frequency, z * frequency);
+          maxValue += amplitude;
+          amplitude *= 0.5;
+          frequency *= 2;
+        }
+        return value / maxValue; // 归一化到 [-1, 1]
+      }
+    }
+
+    // ===== Surface Nets Renderer (Compact Isosurface) =====
+    class SurfaceNetsMesher {
+      constructor() { }
+
+      // 生成等值面网格
+      // data: 3D Grid (Uint8Array or Float32Array)
+      // dims: [width, height, depth]
+      // threshold: surface value
+      // scale: [sx, sy, sz] scale of the mesh
+      generate(data, dims, threshold, scale = [1, 1, 1], offset = [0, 0, 0]) {
+        const [width, height, depth] = dims;
+        const vertices = [];
+        const indices = []; // Triangles
+
+        // 1. Identify active edges and compute intersection points
+        const vertexMap = new Map();
+
+        const getVal = (x, y, z) => {
+          if (x < 0 || y < 0 || z < 0 || x >= width || y >= height || z >= depth) return 0; // Out of bounds = Empty
+          return data[x + y * width + z * width * height];
+        };
+
+        // Extend loops to -1 and size to capture boundary transitions (Capping)
+        for (let z = -1; z < depth; z++) {
+          for (let y = -1; y < height; y++) {
+            for (let x = -1; x < width; x++) {
+
+              // Determine mask of corner signs (binary 8-bit)
+              let mask = 0;
+              if (getVal(x, y, z) > threshold) mask |= 1;
+              if (getVal(x + 1, y, z) > threshold) mask |= 2;
+              if (getVal(x, y + 1, z) > threshold) mask |= 4;
+              if (getVal(x + 1, y + 1, z) > threshold) mask |= 8;
+              if (getVal(x, y, z + 1) > threshold) mask |= 16;
+              if (getVal(x + 1, y, z + 1) > threshold) mask |= 32;
+              if (getVal(x, y + 1, z + 1) > threshold) mask |= 64;
+              if (getVal(x + 1, y + 1, z + 1) > threshold) mask |= 128;
+
+              // Skip if all inside or all outside
+              if (mask === 0 || mask === 255) continue;
+
+              // Calculate edge intersections
+              let edgeCount = 0;
+              let avgX = 0, avgY = 0, avgZ = 0;
+
+              // Helper for edge Intersection (Linear Interpolation)
+              const addIntersection = (x1, y1, z1, v1, x2, y2, z2, v2) => {
+                const t = (threshold - v1) / (v2 - v1);
+                avgX += x1 + (x2 - x1) * t;
+                avgY += y1 + (y2 - y1) * t;
+                avgZ += z1 + (z2 - z1) * t;
+                edgeCount++;
+              };
+
+              // 12 edges
+              const v000 = getVal(x, y, z), v100 = getVal(x + 1, y, z), v010 = getVal(x, y + 1, z), v110 = getVal(x + 1, y + 1, z);
+              const v001 = getVal(x, y, z + 1), v101 = getVal(x + 1, y, z + 1), v011 = getVal(x, y + 1, z + 1), v111 = getVal(x + 1, y + 1, z + 1);
+
+              if ((v000 > threshold) !== (v100 > threshold)) addIntersection(x, y, z, v000, x + 1, y, z, v100);
+              if ((v010 > threshold) !== (v110 > threshold)) addIntersection(x, y + 1, z, v010, x + 1, y + 1, z, v110);
+              if ((v001 > threshold) !== (v101 > threshold)) addIntersection(x, y, z + 1, v001, x + 1, y, z + 1, v101);
+              if ((v011 > threshold) !== (v111 > threshold)) addIntersection(x, y + 1, z + 1, v011, x + 1, y + 1, z + 1, v111);
+
+              if ((v000 > threshold) !== (v010 > threshold)) addIntersection(x, y, z, v000, x, y + 1, z, v010);
+              if ((v100 > threshold) !== (v110 > threshold)) addIntersection(x + 1, y, z, v100, x + 1, y + 1, z, v110);
+              if ((v001 > threshold) !== (v011 > threshold)) addIntersection(x, y, z + 1, v001, x, y + 1, z + 1, v011);
+              if ((v101 > threshold) !== (v111 > threshold)) addIntersection(x + 1, y, z + 1, v101, x + 1, y + 1, z + 1, v111);
+
+              if ((v000 > threshold) !== (v001 > threshold)) addIntersection(x, y, z, v000, x, y, z + 1, v001);
+              if ((v100 > threshold) !== (v101 > threshold)) addIntersection(x + 1, y, z, v100, x + 1, y, z + 1, v101);
+              if ((v010 > threshold) !== (v011 > threshold)) addIntersection(x, y + 1, z, v010, x, y + 1, z + 1, v011);
+              if ((v110 > threshold) !== (v111 > threshold)) addIntersection(x + 1, y + 1, z, v110, x + 1, y + 1, z + 1, v111);
+
+              if (edgeCount > 0) {
+                avgX /= edgeCount;
+                avgY /= edgeCount;
+                avgZ /= edgeCount;
+
+                // Clamp to boundary to create flat caps
+                avgX = Math.max(0, Math.min(width - 1, avgX));
+                avgY = Math.max(0, Math.min(height - 1, avgY));
+                avgZ = Math.max(0, Math.min(depth - 1, avgZ));
+
+                vertexMap.set(`${x},${y},${z}`, vertices.length / 3);
+                vertices.push(
+                  avgX * scale[0] + offset[0],
+                  avgY * scale[1] + offset[1],
+                  avgZ * scale[2] + offset[2]
+                );
+              }
+            }
+          }
+        }
+
+        // 2. Connect vertices (Quads)
+        // Adjust loop for new range
+        for (let z = -1; z < depth; z++) {
+          for (let y = -1; y < height; y++) {
+            for (let x = -1; x < width; x++) {
+
+              const v = getVal(x, y, z);
+
+              // Edge X Crossing
+              const vRight = getVal(x + 1, y, z); // +X
+              // Check bounds for edge processing (we only care if the edge is valid in terms of having neighbors)
+              // The original logic handles neighbors via `getVal` (returns 0).
+              // BUT `vertexMap` lookups need to find the neighbors.
+              // Neighbor cells:
+              // For Edge X (x,y,z)-(x+1,y,z):
+              // Cells: (x,y,z), (x,y-1,z), (x,y-1,z-1), (x,y,z-1)
+              // If y=-1, y-1 is -2 (invalid). So we don't form quads there?
+              // Standard Surface Nets: The "Dual" quad is transversal to the crossed edge.
+
+              if ((v > threshold) !== (vRight > threshold)) {
+                const idx0 = vertexMap.get(`${x},${y},${z}`);
+                const idx1 = vertexMap.get(`${x},${y - 1},${z}`);
+                const idx2 = vertexMap.get(`${x},${y - 1},${z - 1}`);
+                const idx3 = vertexMap.get(`${x},${y},${z - 1}`);
+
+                if (idx0 !== undefined && idx1 !== undefined && idx2 !== undefined && idx3 !== undefined) {
+                  if (v > threshold) {
+                    indices.push(idx0, idx1, idx2, idx0, idx2, idx3); // CW
+                  } else {
+                    indices.push(idx0, idx3, idx2, idx0, idx2, idx1); // CCW
+                  }
+                }
+              }
+
+              // Edge Y Crossing
+              const vTop = getVal(x, y + 1, z); // +Y
+              if ((v > threshold) !== (vTop > threshold)) {
+                const idx0 = vertexMap.get(`${x},${y},${z}`);
+                const idx1 = vertexMap.get(`${x},${y},${z - 1}`);
+                const idx2 = vertexMap.get(`${x - 1},${y},${z - 1}`);
+                const idx3 = vertexMap.get(`${x - 1},${y},${z}`);
+
+                if (idx0 !== undefined && idx1 !== undefined && idx2 !== undefined && idx3 !== undefined) {
+                  if (v > threshold) {
+                    indices.push(idx0, idx1, idx2, idx0, idx2, idx3);
+                  } else {
+                    indices.push(idx0, idx3, idx2, idx0, idx2, idx1);
+                  }
+                }
+              }
+
+              // Edge Z Crossing
+              const vFront = getVal(x, y, z + 1); // +Z
+              if ((v > threshold) !== (vFront > threshold)) {
+                const idx0 = vertexMap.get(`${x},${y},${z}`);
+                const idx1 = vertexMap.get(`${x - 1},${y},${z}`);
+                const idx2 = vertexMap.get(`${x - 1},${y - 1},${z}`);
+                const idx3 = vertexMap.get(`${x},${y - 1},${z}`);
+
+                if (idx0 !== undefined && idx1 !== undefined && idx2 !== undefined && idx3 !== undefined) {
+                  if (v > threshold) {
+                    indices.push(idx0, idx1, idx2, idx0, idx2, idx3);
+                  } else {
+                    indices.push(idx0, idx3, idx2, idx0, idx2, idx1);
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        return { vertices: new Float32Array(vertices), indices: new Uint32Array(indices) };
+      }
+    }
+
+    // ===== City Generation =====
+    function generateCity(params, blockKey = '0,0,0', adjacentExits = {}) {
+
+      const {
+        seed, gridSize, roadSpacing, roadWidth, roadOffset, roadDensity, branchDensity, branchFork, branchMaxLen, alleyMaxLen, roadPruneThreshold,
+        lakeThreshold, lakeScale, mountainThreshold, mountainScale, mountainDensity,
+        // 密度参数
+        densityMode, centerDensity, edgeDensity, densityCurve, densitySigma,
+        densityNoiseThreshold, densityNoiseScale, densityNoiseMax, densityNoiseMin, densityUniform,
+        // W高度参数
+        wMode, centerW, edgeW, wCurve, wSigma,
+        wNoiseScale, wNoiseOffset, wNoiseAmplitude, wUniform, wNoise,
+        // 其他
+        minBuildingSize, maxBuildingSize
+      } = params;
+
+      // 为每个区块计算独立但确定的种子
+      const blockSeed = getBlockSeed(seed, blockKey);
+      const blockOffset = getBlockOffset(blockKey);
+
+      const rng = new SeededRNG(blockSeed);
+      // Perlin噪声使用全局坐标，确保跨区块连续
+      const perlin = new PerlinNoise3D(seed);
+      const perlinDensity = new PerlinNoise3D(seed + 1000);
+      const perlinW = new PerlinNoise3D(seed + 2000);
+      const perlinMountain = new PerlinNoise3D(seed + 3000); // 山脉噪声
+
+      const grid = new Uint8Array(gridSize * gridSize * gridSize);
+      const idx = (x, y, z) => x + y * gridSize + z * gridSize * gridSize;
+      const inBounds = (x, y, z) => x >= 0 && x < gridSize && y >= 0 && y < gridSize && z >= 0 && z < gridSize;
+      const center = gridSize / 2;
+      const maxDist = center * Math.sqrt(3);
+
+      const mesher = new SurfaceNetsMesher();
+
+      // Data grids for meshing (Float32)
+      const lakeData = new Float32Array(gridSize * gridSize * gridSize);
+      const mountainData = new Float32Array(gridSize * gridSize * gridSize);
+
+      // 通用曲线计算函数
+      const calcCurveFactor = (t, curve, sigma) => {
+        switch (curve) {
+          case 'linear': return t;
+          case 'gaussian': return 1 - Math.exp(-(t * t) / (2 * sigma * sigma));
+          case 'sigmoid': const k = 10 / sigma; return 1 / (1 + Math.exp(-k * (t - 0.5)));
+          case 'plateau': return t < sigma ? 0 : Math.pow((t - sigma) / (1 - sigma), 2);
+          default: return t;
+        }
+      };
+
+      // 建筑密度函数（支持多种模式）
+      const getDensity = (x, y, z) => {
+        // 全局坐标用于噪声采样（确保跨区块连续）
+        const gx = x + blockOffset.x;
+        const gy = y + blockOffset.y;
+        const gz = z + blockOffset.z;
+
+        switch (densityMode) {
+          case 'radial': {
+            // 辐射模式：从区块中心向边缘渐变
+            const dist = Math.sqrt((x - center) ** 2 + (y - center) ** 2 + (z - center) ** 2);
+            const t = dist / maxDist;
+            const factor = calcCurveFactor(t, densityCurve, densitySigma);
+            return centerDensity - (centerDensity - edgeDensity) * factor;
+          }
+          case 'noise': {
+            // 噪声模式：基于 Perlin 噪声的自然分布（使用全局坐标）
+            const noiseVal = perlinDensity.fbm(gx * densityNoiseScale, gy * densityNoiseScale, gz * densityNoiseScale, 3);
+            // 噪声值 [-1, 1] 转换为 [0, 1]
+            const normalized = (noiseVal + 1) / 2;
+            // 低于阈值 → 空地（使用空地密度），高于阈值 → 形成团簇
+            if (normalized < (1 - densityNoiseThreshold)) {
+              return densityNoiseMin; // 空地区域的密度
+            }
+            // 高于阈值的区域，从空地密度平滑过渡到团簇密度
+            const t = (normalized - (1 - densityNoiseThreshold)) / densityNoiseThreshold;
+            return densityNoiseMin + (densityNoiseMax - densityNoiseMin) * t;
+          }
+          case 'uniform': {
+            // 均匀模式：固定密度
+            return densityUniform;
+          }
+          default:
+            return 0.5;
+        }
+      };
+
+      // W高度函数（支持多种模式）
+      const getWHeight = (x, y, z) => {
+        // 全局坐标用于噪声采样
+        const gx = x + blockOffset.x;
+        const gy = y + blockOffset.y;
+        const gz = z + blockOffset.z;
+
+        switch (wMode) {
+          case 'radial': {
+            // 辐射模式：从区块中心向边缘渐变
+            const dist = Math.sqrt((x - center) ** 2 + (y - center) ** 2 + (z - center) ** 2);
+            const t = dist / maxDist;
+            const factor = calcCurveFactor(t, wCurve, wSigma);
+            return centerW - (centerW - edgeW) * factor;
+          }
+          case 'noise': {
+            // 噪声模式：基于 Perlin 噪声的自然分布（使用全局坐标）
+            const noiseVal = perlinW.fbm(gx * wNoiseScale, gy * wNoiseScale, gz * wNoiseScale, 3);
+            // 噪声值 [-1, 1] 转换为 W 高度
+            return wNoiseOffset + noiseVal * wNoiseAmplitude;
+          }
+          case 'uniform': {
+            // 均匀模式：固定 W 高度
+            return wUniform;
+          }
+          default:
+            return 0.5;
+        }
+      };
+
+      // ===== 生成湖泊掩码 (基于 Perlin 噪声，使用全局坐标确保跨区块连续) =====
+      const isLake = new Uint8Array(gridSize * gridSize * gridSize);
+      for (let x = 0; x < gridSize; x++) {
+        for (let y = 0; y < gridSize; y++) {
+          for (let z = 0; z < gridSize; z++) {
+            // 使用全局坐标进行噪声采样
+            const gx = x + blockOffset.x;
+            const gy = y + blockOffset.y;
+            const gz = z + blockOffset.z;
+            const noiseVal = perlin.fbm(gx * lakeScale, gy * lakeScale, gz * lakeScale, 3);
+
+            // For meshing: We want "inside" to be > threshold.
+            // Original logic: noiseVal < lakeThreshold - 0.5 is lake.
+            // So let's store (lakeThreshold - 0.5) - noiseVal. 
+            // If result > 0, it's a lake.
+            lakeData[idx(x, y, z)] = (lakeThreshold - 0.5) - noiseVal;
+
+            if (lakeData[idx(x, y, z)] > 0) {
+              isLake[idx(x, y, z)] = 1;
+            }
+          }
+        }
+      }
+
+      // ===== 生成山脉掩码 (基于 Perlin 噪声，高于阈值的区域为山脉) =====
+      const isMountain = new Uint8Array(gridSize * gridSize * gridSize);
+      for (let x = 0; x < gridSize; x++) {
+        for (let y = 0; y < gridSize; y++) {
+          for (let z = 0; z < gridSize; z++) {
+            const gx = x + blockOffset.x;
+            const gy = y + blockOffset.y;
+            const gz = z + blockOffset.z;
+            const noiseVal = perlinMountain.fbm(gx * mountainScale, gy * mountainScale, gz * mountainScale, 3);
+
+            // Original logic: noiseVal > 0.5 - mountainThreshold is mountain.
+            // Store: noiseVal - (0.5 - mountainThreshold).
+            // If > 0, it's mountain.
+            mountainData[idx(x, y, z)] = noiseVal - (0.5 - mountainThreshold);
+
+            // 噪声值范围约 [-1, 1]，高于阈值的区域为山脉（与湖泊相反）
+            if (mountainData[idx(x, y, z)] > 0 && !isLake[idx(x, y, z)]) {
+              isMountain[idx(x, y, z)] = 1;
+            }
+          }
+        }
+      }
+
+      grid.fill(1);
+      const roadCells = new Set();
+      const mainRoadCells = new Set(); // 主干道核心格子，不会被移除
+      const dirs = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
+
+      // 边界出口记录 (为多区块扩展准备)
+      const boundaryExits = {
+        '+x': [], '-x': [], '+y': [], '-y': [], '+z': [], '-z': []
+      };
+
+      const markRoad = (x, y, z, isMain = false) => {
+        if (inBounds(x, y, z)) {
+          // 跳过湖泊和山脉
+          if (isLake[idx(x, y, z)] || isMountain[idx(x, y, z)]) return;
+
+          const i = idx(x, y, z);
+          grid[i] = 0;
+          roadCells.add(i);
+          if (isMain) mainRoadCells.add(i);
+
+          // 记录边界出口
+          if (x === 0) boundaryExits['-x'].push({ y, z });
+          if (x === gridSize - 1) boundaryExits['+x'].push({ y, z });
+          if (y === 0) boundaryExits['-y'].push({ x, z });
+          if (y === gridSize - 1) boundaryExits['+y'].push({ x, z });
+          if (z === 0) boundaryExits['-z'].push({ x, y });
+          if (z === gridSize - 1) boundaryExits['+z'].push({ x, y });
+        }
+      };
+
+
+      // ===== 步骤0：边界对接 (连接相邻区块的道路) =====
+      if (adjacentExits) {
+        const extLen = Math.min(6, roadSpacing); // 向内延伸长度
+
+        // -X方向 (连接到 x=0)
+        if (adjacentExits['-x']) {
+          for (const { y, z } of adjacentExits['-x']) {
+            for (let i = 0; i < extLen; i++) markRoad(i, y, z, true);
+          }
+        }
+        // +X方向 (连接到 x=gridSize-1)
+        if (adjacentExits['+x']) {
+          for (const { y, z } of adjacentExits['+x']) {
+            for (let i = 0; i < extLen; i++) markRoad(gridSize - 1 - i, y, z, true);
+          }
+        }
+        // -Y方向 (连接到 y=0)
+        if (adjacentExits['-y']) {
+          for (const { x, z } of adjacentExits['-y']) {
+            for (let i = 0; i < extLen; i++) markRoad(x, i, z, true);
+          }
+        }
+        // +Y方向 (连接到 y=gridSize-1)
+        if (adjacentExits['+y']) {
+          for (const { x, z } of adjacentExits['+y']) {
+            for (let i = 0; i < extLen; i++) markRoad(x, gridSize - 1 - i, z, true);
+          }
+        }
+        // -Z方向 (连接到 z=0)
+        if (adjacentExits['-z']) {
+          for (const { x, y } of adjacentExits['-z']) {
+            for (let i = 0; i < extLen; i++) markRoad(x, y, i, true);
+          }
+        }
+        // +Z方向 (连接到 z=gridSize-1)
+        if (adjacentExits['+z']) {
+          for (const { x, y } of adjacentExits['+z']) {
+            for (let i = 0; i < extLen; i++) markRoad(x, y, gridSize - 1 - i, true);
+          }
+        }
+      }
+
+      // ===== 第一步：主干道随密度变化 =====
+      for (let cx = 0; cx < gridSize; cx += roadSpacing) {
+        for (let cy = 0; cy < gridSize; cy += roadSpacing) {
+          for (let cz = 0; cz < gridSize; cz += roadSpacing) {
+            // 计算该超级格中心的密度
+            const cellCenterX = cx + roadSpacing / 2;
+            const cellCenterY = cy + roadSpacing / 2;
+            const cellCenterZ = cz + roadSpacing / 2;
+            const localDensity = getDensity(cellCenterX, cellCenterY, cellCenterZ);
+
+            // 主干道生成概率 = roadDensity × localDensity
+            const prob = roadDensity * (0.3 + 0.7 * localDensity); // 保底30%，避免完全没路
+
+            // 随机偏移（在 [-roadOffset, +roadOffset] 范围内）
+            const getOffset = () => roadOffset > 0 ? Math.floor(rng.next() * (roadOffset * 2 + 1)) - roadOffset : 0;
+
+            if (rng.next() < prob) {
+              const offsetY = getOffset(), offsetZ = getOffset();
+              const roadY = Math.max(0, Math.min(gridSize - roadWidth, cy + 1 + offsetY));
+              const roadZ = Math.max(0, Math.min(gridSize - roadWidth, cz + 1 + offsetZ));
+              for (let x = 0; x < gridSize; x++)
+                for (let w = 0; w < roadWidth; w++)
+                  for (let h = 0; h < roadWidth; h++)
+                    markRoad(x, roadY + w, roadZ + h, true);
+            }
+            if (rng.next() < prob) {
+              const offsetX = getOffset(), offsetZ = getOffset();
+              const roadX = Math.max(0, Math.min(gridSize - roadWidth, cx + 1 + offsetX));
+              const roadZ = Math.max(0, Math.min(gridSize - roadWidth, cz + Math.min(3, roadSpacing - 1) + offsetZ));
+              for (let y = 0; y < gridSize; y++)
+                for (let w = 0; w < roadWidth; w++)
+                  for (let h = 0; h < roadWidth; h++)
+                    markRoad(roadX + w, y, roadZ + h, true);
+            }
+            if (rng.next() < prob) {
+              const offsetX = getOffset(), offsetY = getOffset();
+              const roadX = Math.max(0, Math.min(gridSize - roadWidth, cx + Math.min(3, roadSpacing - 1) + offsetX));
+              const roadY = Math.max(0, Math.min(gridSize - roadWidth, cy + Math.min(3, roadSpacing - 1) + offsetY));
+              for (let z = 0; z < gridSize; z++)
+                for (let w = 0; w < roadWidth; w++)
+                  for (let h = 0; h < roadWidth; h++)
+                    markRoad(roadX + w, roadY + h, z, true);
+            }
+          }
+        }
+      }
+
+      // ===== 第二步：支路 =====
+      const branchCount = Math.floor(gridSize * gridSize * branchDensity);
+      for (let b = 0; b < branchCount; b++) {
+        const roadArray = Array.from(roadCells);
+        if (roadArray.length === 0) break;
+        const startIdx = roadArray[Math.floor(rng.next() * roadArray.length)];
+        const startX = startIdx % gridSize;
+        const startY = Math.floor(startIdx / gridSize) % gridSize;
+        const startZ = Math.floor(startIdx / (gridSize * gridSize));
+        const dir = Math.floor(rng.next() * 6);
+        const [dx, dy, dz] = dirs[dir];
+        const branchLen = Math.floor(rng.next() * (branchMaxLen - 2)) + 3;
+
+        for (let i = 1; i <= branchLen; i++) {
+          const nx = startX + dx * i, ny = startY + dy * i, nz = startZ + dz * i;
+          if (!inBounds(nx, ny, nz)) break;
+          if (isLake[idx(nx, ny, nz)] || isMountain[idx(nx, ny, nz)]) break;
+          markRoad(nx, ny, nz, false);
+          if (rng.next() < branchFork) {
+            const perpDirs = dir < 2 ? [[0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]] :
+              dir < 4 ? [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]] :
+                [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0]];
+            const [fdx, fdy, fdz] = perpDirs[Math.floor(rng.next() * 4)];
+            const forkLen = Math.floor(rng.next() * 3) + 1;
+            for (let j = 1; j <= forkLen; j++) {
+              const fx = nx + fdx * j, fy = ny + fdy * j, fz = nz + fdz * j;
+              if (!inBounds(fx, fy, fz) || isLake[idx(fx, fy, fz)] || isMountain[idx(fx, fy, fz)]) break;
+              markRoad(fx, fy, fz, false);
+            }
+          }
+        }
+      }
+
+      // ===== 第三步：小路 =====
+      const alleyCount = Math.floor(gridSize * gridSize * 0.08);
+      for (let a = 0; a < alleyCount; a++) {
+        const x = Math.floor(rng.next() * gridSize);
+        const y = Math.floor(rng.next() * gridSize);
+        const z = Math.floor(rng.next() * gridSize);
+        const alleyLen = Math.floor(rng.next() * alleyMaxLen) + 1;
+        const dir = Math.floor(rng.next() * 6);
+        const [dx, dy, dz] = dirs[dir];
+        for (let i = 0; i <= alleyLen; i++) {
+          const nx = x + dx * i, ny = y + dy * i, nz = z + dz * i;
+          if (!inBounds(nx, ny, nz) || isLake[idx(nx, ny, nz)] || isMountain[idx(nx, ny, nz)]) break;
+          markRoad(nx, ny, nz, false);
+        }
+      }
+
+      // 保存道路状态
+      const isRoad = new Uint8Array(gridSize * gridSize * gridSize);
+      for (const i of roadCells) isRoad[i] = 1;
+
+      // 清空非道路区域准备生成建筑
+      for (let i = 0; i < grid.length; i++) if (!isRoad[i]) grid[i] = 0;
+
+
+
+      const canPlace = (x, y, z, sx, sy, sz) => {
+        for (let dx = 0; dx < sx; dx++)
+          for (let dy = 0; dy < sy; dy++)
+            for (let dz = 0; dz < sz; dz++) {
+              const nx = x + dx, ny = y + dy, nz = z + dz;
+              if (!inBounds(nx, ny, nz)) return false;
+              const i = idx(nx, ny, nz);
+              if (isRoad[i] || grid[i] === 1 || isLake[i]) return false; // 山脉允许建筑
+            }
+        return true;
+      };
+
+      const placeBuilding = (x, y, z, sx, sy, sz) => {
+        for (let dx = 0; dx < sx; dx++)
+          for (let dy = 0; dy < sy; dy++)
+            for (let dz = 0; dz < sz; dz++)
+              grid[idx(x + dx, y + dy, z + dz)] = 1;
+      };
+
+      // 种子扩张
+      const seeds = [];
+      for (let x = 0; x < gridSize; x++)
+        for (let y = 0; y < gridSize; y++)
+          for (let z = 0; z < gridSize; z++) {
+            const i = idx(x, y, z);
+            if (isRoad[i] || isLake[i]) continue; // 山脉允许建筑
+            const density = getDensity(x, y, z);
+            // 山脉区域：与城市密度相乘
+            if (isMountain[i]) {
+              if (rng.next() < density * mountainDensity) seeds.push({ x, y, z, density });
+            } else {
+              if (rng.next() < density * 0.3) seeds.push({ x, y, z, density });
+            }
+          }
+      seeds.sort((a, b) => b.density - a.density);
+
+      for (const s of seeds) {
+        const { x, y, z, density } = s;
+        if (grid[idx(x, y, z)] === 1) continue;
+        const sizeRange = minBuildingSize + (maxBuildingSize - minBuildingSize) * density;
+        const sx = rng.nextInt(minBuildingSize, Math.ceil(sizeRange));
+        const sy = rng.nextInt(minBuildingSize, Math.ceil(sizeRange));
+        const sz = rng.nextInt(minBuildingSize, Math.ceil(sizeRange));
+        for (let shrink = 0; shrink < 3; shrink++) {
+          const tsx = Math.max(1, sx - shrink), tsy = Math.max(1, sy - shrink), tsz = Math.max(1, sz - shrink);
+          if (canPlace(x, y, z, tsx, tsy, tsz)) { placeBuilding(x, y, z, tsx, tsy, tsz); break; }
+        }
+      }
+
+      // 贪心合并建筑
+      const buildings = [];
+      const visited = new Uint8Array(gridSize * gridSize * gridSize);
+      for (let x = 0; x < gridSize; x++)
+        for (let y = 0; y < gridSize; y++)
+          for (let z = 0; z < gridSize; z++) {
+            const i = idx(x, y, z);
+            if (grid[i] !== 1 || visited[i]) continue;
+            // Randomized Axis Expansion to avoid directional bias
+            const start = [x, y, z];
+            const end = [x, y, z]; // inclusive end indices
+            const axes = [0, 1, 2];
+            // Shuffle axes
+            for (let k = axes.length - 1; k > 0; k--) {
+              const j = Math.floor(rng.next() * (k + 1));
+              [axes[k], axes[j]] = [axes[j], axes[k]];
+            };
+
+            // Helper to check safety of expansion
+            const checkRange = (mins, maxs) => {
+              for (let tx = mins[0]; tx <= maxs[0]; tx++)
+                for (let ty = mins[1]; ty <= maxs[1]; ty++)
+                  for (let tz = mins[2]; tz <= maxs[2]; tz++) {
+                    if (grid[idx(tx, ty, tz)] !== 1 || visited[idx(tx, ty, tz)]) return false;
+                  }
+              return true;
+            };
+
+            // Expand in order of shuffled axes
+            for (const axis of axes) {
+              // Try to extend as much as possible in this axis
+              // While keeping other dimensions fixed at current build size
+              let canExpand = true;
+              while (canExpand && end[axis] + 1 < gridSize) {
+                // Proposed new slice range
+                const testMin = [...start];
+                const testMax = [...end];
+                testMin[axis] = end[axis] + 1;
+                testMax[axis] = end[axis] + 1;
+
+                // If safe, increment
+                if (checkRange(testMin, testMax)) {
+                  end[axis]++;
+                } else {
+                  canExpand = false;
+                }
+              }
+            }
+
+            // Mark as visited
+            for (let tx = start[0]; tx <= end[0]; tx++)
+              for (let ty = start[1]; ty <= end[1]; ty++)
+                for (let tz = start[2]; tz <= end[2]; tz++)
+                  visited[idx(tx, ty, tz)] = 1;
+
+            const ex = end[0], ey = end[1], ez = end[2];
+            const cx = (x + ex) / 2, cy = (y + ey) / 2, cz = (z + ez) / 2;
+            // 使用独立的W高度曲线计算，加上随机扰动
+            const baseW = getWHeight(cx, cy, cz);
+            let wHeight = Math.max(0, Math.min(1, baseW + (rng.next() - 0.5) * wNoise * 2));
+
+            // 分配建筑类型
+            const dist = Math.sqrt((cx - center) ** 2 + (cy - center) ** 2 + (cz - center) ** 2) / maxDist;
+            const volume = (ex - x + 1) * (ey - y + 1) * (ez - z + 1);
+            const maxDim = Math.max(ex - x + 1, ey - y + 1, ez - z + 1);
+            const minDim = Math.min(ex - x + 1, ey - y + 1, ez - z + 1);
+            const isFlat = maxDim > minDim * 2;
+
+            let type, subtype;
+            const r = rng.next();
+
+            // 辅助函数：从子类型对象中随机选择一个
+            const pickSubtype = (typeKey) => {
+              const keys = Object.keys(BUILDING_TYPES[typeKey].subtypes);
+              return keys[Math.floor(rng.next() * keys.length)];
+            };
+
+            // 检查是否在山脉区域
+            const centerIdx = idx(Math.round(cx), Math.round(cy), Math.round(cz));
+            const isOnMountain = isMountain[centerIdx];
+
+            if (isOnMountain) {
+              // 山地建筑：根据高度（Y轴）区分山顶和山脚
+              const relativeHeight = cy / gridSize;
+              const isSummit = relativeHeight > 0.45; // 高度超过 45% 视为山顶区域
+
+              type = 'mountain';
+              if (!isSummit) {
+                // 山腰/山脚：度假村、別墅
+                const subtypes = ['度假村', '山莊', '別墅'];
+                subtype = subtypes[Math.floor(rng.next() * subtypes.length)];
+              } else {
+                // 山顶：寺庙、神社、观景台、信号塔
+                const subtypes = ['寺庙', '神社', '観景台', '信号塔'];
+                subtype = subtypes[Math.floor(rng.next() * subtypes.length)];
+
+                // 山顶建筑增加W高度偏移，使其在4D空间中“更高”
+                wHeight = Math.min(1.0, wHeight + 0.4);
+              }
+            } else if (dist < 0.15 && volume > 20) {
+              // 最中心 + 大体积 → 地标
+              type = 'landmark';
+              subtype = rng.next() < 0.8 ? '地标塔' : '纪念碑';
+            } else if (dist < 0.4 && volume > 8) {
+              // 中心区域 + 大体积 → 商业
+              type = 'commercial';
+              subtype = pickSubtype('commercial');
+            } else if (dist > 0.6 && isFlat) {
+              // 边缘 + 扁平 → 工业
+              type = 'industrial';
+              subtype = pickSubtype('industrial');
+            } else if (r < 0.12) {
+              // 随机分配公共建筑（较少）
+              type = 'public';
+              subtype = pickSubtype('public');
+            } else {
+              // 其他 → 住宅
+              type = 'residential';
+              subtype = volume < 4 ? '别墅' : (rng.next() < 0.5 ? '公寓' : '住宅楼');
+            }
+
+            buildings.push({
+              // 坐标包含区块偏移
+              x: cx - center + 0.5 + blockOffset.x,
+              y: cy - center + 0.5 + blockOffset.y,
+              z: cz - center + 0.5 + blockOffset.z,
+              sx: ex - x + 1, sy: ey - y + 1, sz: ez - z + 1,
+              wHeight, type, subtype,
+              originalIndex: buildings.length, // 区块内索引
+              blockKey: blockKey, // 所属区块
+              gridX: Math.round(cx), gridY: Math.round(cy), gridZ: Math.round(cz) // 网格坐标，用于显示
+            });
+          }
+
+      // ===== 第五步：移除无用的主干道 =====
+      // 规则：如果整条主干道只接触0或1个建筑，则移除整条
+      // 需要先记录每条主干道的格子，再统计接触建筑数
+
+      // 收集所有主干道段（每条主干道是一组格子）
+      const mainRoadSegments = [];
+      const processedMainRoad = new Set();
+
+      for (const i of mainRoadCells) {
+        if (processedMainRoad.has(i)) continue;
+
+        const x = i % gridSize;
+        const y = Math.floor(i / gridSize) % gridSize;
+        const z = Math.floor(i / (gridSize * gridSize));
+
+        // 找这条主干道的方向（检查哪个方向是连续的道路）
+        let segmentCells = [i];
+        processedMainRoad.add(i);
+
+        // 检查三个方向，找到主干道延伸的方向
+        for (const [dx, dy, dz] of dirs) {
+          // 正向延伸
+          let cx = x + dx, cy = y + dy, cz = z + dz;
+          while (inBounds(cx, cy, cz)) {
+            const ni = idx(cx, cy, cz);
+            if (mainRoadCells.has(ni) && !processedMainRoad.has(ni)) {
+              segmentCells.push(ni);
+              processedMainRoad.add(ni);
+              cx += dx; cy += dy; cz += dz;
+            } else {
+              break;
+            }
+          }
+          // 反向延伸
+          cx = x - dx; cy = y - dy; cz = z - dz;
+          while (inBounds(cx, cy, cz)) {
+            const ni = idx(cx, cy, cz);
+            if (mainRoadCells.has(ni) && !processedMainRoad.has(ni)) {
+              segmentCells.push(ni);
+              processedMainRoad.add(ni);
+              cx -= dx; cy -= dy; cz -= dz;
+            } else {
+              break;
+            }
+          }
+        }
+
+        mainRoadSegments.push(segmentCells);
+      }
+
+      // 检查每条主干道接触多少个建筑
+      const toRemoveSegments = [];
+      for (const segment of mainRoadSegments) {
+        let isBoundary = false;
+        const touchedBuildings = new Set();
+
+        for (const i of segment) {
+          const x = i % gridSize;
+          const y = Math.floor(i / gridSize) % gridSize;
+          const z = Math.floor(i / (gridSize * gridSize));
+
+          // 属于边界的道路不裁剪（为了连接相邻区块）
+          if (x === 0 || x === gridSize - 1 || y === 0 || y === gridSize - 1 || z === 0 || z === gridSize - 1) {
+            isBoundary = true;
+          }
+
+          // 检查6邻居
+          for (const [dx, dy, dz] of dirs) {
+            const nx = x + dx, ny = y + dy, nz = z + dz;
+            if (inBounds(nx, ny, nz) && grid[idx(nx, ny, nz)] === 1) {
+              // 用坐标作为建筑标识（简化，实际可能需要更复杂的建筑ID）
+              touchedBuildings.add(idx(nx, ny, nz));
+            }
+          }
+        }
+
+        // 如果接触 < 阈值且不是边界道路，则移除
+        if (!isBoundary && touchedBuildings.size < roadPruneThreshold) {
+          toRemoveSegments.push(segment);
+        }
+      }
+
+      // 移除
+      for (const segment of toRemoveSegments) {
+        for (const i of segment) {
+          isRoad[i] = 0;
+          roadCells.delete(i);
+          mainRoadCells.delete(i);
+        }
+      }
+
+      // ===== 第六步：移除郊区多余的非主干道 =====
+      // 检查非主干道格子周围5×5×5范围的建筑密度
+      const toRemove = [];
+      for (const i of roadCells) {
+        if (mainRoadCells.has(i)) continue; // 跳过主干道
+
+        const x = i % gridSize;
+        const y = Math.floor(i / gridSize) % gridSize;
+        const z = Math.floor(i / (gridSize * gridSize));
+
+        // 统计周围建筑数量
+        let buildingCount = 0;
+        let totalNeighbors = 0;
+        for (let dx = -2; dx <= 2; dx++) {
+          for (let dy = -2; dy <= 2; dy++) {
+            for (let dz = -2; dz <= 2; dz++) {
+              if (dx === 0 && dy === 0 && dz === 0) continue;
+              const nx = x + dx, ny = y + dy, nz = z + dz;
+              if (inBounds(nx, ny, nz)) {
+                totalNeighbors++;
+                if (grid[idx(nx, ny, nz)] === 1) buildingCount++;
+              }
+            }
+          }
+        }
+
+        const buildingRatio = buildingCount / totalNeighbors;
+        const localDensity = getDensity(x, y, z);
+
+        // 郊区且周围建筑少，移除
+        if (localDensity < 0.3 && buildingRatio < 0.1) {
+          toRemove.push(i);
+        } else if (localDensity < 0.5 && buildingRatio < 0.05) {
+          toRemove.push(i);
+        }
+      }
+
+      for (const i of toRemove) {
+        isRoad[i] = 0;
+        roadCells.delete(i);
+      }
+
+      // ===== 第七步：连通性检测与补连 =====
+      // 用BFS找连通分量
+      const visitedConn = new Uint8Array(gridSize * gridSize * gridSize);
+      const components = []; // 每个连通分量的格子列表
+
+      for (const i of roadCells) {
+        if (visitedConn[i]) continue;
+
+        const component = [];
+        const queue = [i];
+        visitedConn[i] = 1;
+
+        while (queue.length > 0) {
+          const curr = queue.shift();
+          component.push(curr);
+
+          const cx = curr % gridSize;
+          const cy = Math.floor(curr / gridSize) % gridSize;
+          const cz = Math.floor(curr / (gridSize * gridSize));
+
+          // 6邻居
+          for (const [dx, dy, dz] of dirs) {
+            const nx = cx + dx, ny = cy + dy, nz = cz + dz;
+            if (!inBounds(nx, ny, nz)) continue;
+            const ni = idx(nx, ny, nz);
+            if (roadCells.has(ni) && !visitedConn[ni]) {
+              visitedConn[ni] = 1;
+              queue.push(ni);
+            }
+          }
+        }
+
+        components.push(component);
+      }
+
+      // 找最大连通分量
+      components.sort((a, b) => b.length - a.length);
+      const mainComponent = new Set(components[0] || []);
+
+      // 尝试连接小分量到主分量，或移除太远的小分量
+      for (let c = 1; c < components.length; c++) {
+        const comp = components[c];
+        if (comp.length < 3) {
+          // 太小的分量直接移除
+          for (const i of comp) {
+            isRoad[i] = 0;
+            roadCells.delete(i);
+          }
+          continue;
+        }
+
+        // 找该分量最靠近主分量的点
+        let bestDist = Infinity;
+        let bestFrom = null;
+        let bestTo = null;
+
+        for (const i of comp) {
+          const x1 = i % gridSize;
+          const y1 = Math.floor(i / gridSize) % gridSize;
+          const z1 = Math.floor(i / (gridSize * gridSize));
+
+          for (const j of mainComponent) {
+            const x2 = j % gridSize;
+            const y2 = Math.floor(j / gridSize) % gridSize;
+            const z2 = Math.floor(j / (gridSize * gridSize));
+
+            const dist = Math.abs(x1 - x2) + Math.abs(y1 - y2) + Math.abs(z1 - z2);
+            if (dist < bestDist) {
+              bestDist = dist;
+              bestFrom = { x: x1, y: y1, z: z1 };
+              bestTo = { x: x2, y: y2, z: z2 };
+            }
+          }
+        }
+
+        // 如果距离合理，画一条连接路
+        if (bestDist <= gridSize / 3 && bestFrom && bestTo) {
+          // 简单的三段折线连接
+          let cx = bestFrom.x, cy = bestFrom.y, cz = bestFrom.z;
+
+          // X方向
+          while (cx !== bestTo.x) {
+            cx += (bestTo.x > cx) ? 1 : -1;
+            const ni = idx(cx, cy, cz);
+            if (inBounds(cx, cy, cz) && grid[ni] !== 1) {
+              isRoad[ni] = 1;
+              roadCells.add(ni);
+              mainComponent.add(ni);
+            }
+          }
+          // Y方向
+          while (cy !== bestTo.y) {
+            cy += (bestTo.y > cy) ? 1 : -1;
+            const ni = idx(cx, cy, cz);
+            if (inBounds(cx, cy, cz) && grid[ni] !== 1) {
+              isRoad[ni] = 1;
+              roadCells.add(ni);
+              mainComponent.add(ni);
+            }
+          }
+          // Z方向
+          while (cz !== bestTo.z) {
+            cz += (bestTo.z > cz) ? 1 : -1;
+            const ni = idx(cx, cy, cz);
+            if (inBounds(cx, cy, cz) && grid[ni] !== 1) {
+              isRoad[ni] = 1;
+              roadCells.add(ni);
+              mainComponent.add(ni);
+            }
+          }
+
+          // 把该分量加入主分量
+          for (const i of comp) mainComponent.add(i);
+        } else {
+          // 太远，移除
+          for (const i of comp) {
+            isRoad[i] = 0;
+            roadCells.delete(i);
+          }
+        }
+      }
+
+      // 贪心合并道路
+      const roads = [];
+      const visitedRoad = new Uint8Array(gridSize * gridSize * gridSize);
+      for (let x = 0; x < gridSize; x++)
+        for (let y = 0; y < gridSize; y++)
+          for (let z = 0; z < gridSize; z++) {
+            const i = idx(x, y, z);
+            if (!isRoad[i] || visitedRoad[i]) continue;
+            let ex = x, ey = y, ez = z;
+            while (ex + 1 < gridSize && isRoad[idx(ex + 1, y, z)] && !visitedRoad[idx(ex + 1, y, z)]) ex++;
+            let canY = true;
+            while (canY && ey + 1 < gridSize) {
+              for (let tx = x; tx <= ex; tx++) if (!isRoad[idx(tx, ey + 1, z)] || visitedRoad[idx(tx, ey + 1, z)]) { canY = false; break; }
+              if (canY) ey++;
+            }
+            let canZ = true;
+            while (canZ && ez + 1 < gridSize) {
+              outer: for (let tx = x; tx <= ex; tx++) for (let ty = y; ty <= ey; ty++) if (!isRoad[idx(tx, ty, ez + 1)] || visitedRoad[idx(tx, ty, ez + 1)]) { canZ = false; break outer; }
+              if (canZ) ez++;
+            }
+            for (let tx = x; tx <= ex; tx++) for (let ty = y; ty <= ey; ty++) for (let tz = z; tz <= ez; tz++) visitedRoad[idx(tx, ty, tz)] = 1;
+            roads.push({
+              x: (x + ex) / 2 - center + 0.5 + blockOffset.x,
+              y: (y + ey) / 2 - center + 0.5 + blockOffset.y,
+              z: (z + ez) / 2 - center + 0.5 + blockOffset.z,
+              sx: ex - x + 1, sy: ey - y + 1, sz: ez - z + 1
+            });
+          }
+
+      // 贪心合并湖泊 -> 替换为 Mesh 生成
+      const lakeMesh = mesher.generate(
+        lakeData,
+        [gridSize, gridSize, gridSize],
+        0, // Threshold (we normalized data so > 0 is inside)
+        [1, 1, 1],
+        [blockOffset.x - center, blockOffset.y - center, blockOffset.z - center]
+      );
+
+      // 贪心合并山脉 -> 替换为 Mesh 生成
+      const mountainMesh = mesher.generate(
+        mountainData,
+        [gridSize, gridSize, gridSize],
+        0,
+        [1, 1, 1],
+        [blockOffset.x - center, blockOffset.y - center, blockOffset.z - center]
+      );
+
+      // Legacy arrays kept empty or null to avoid breaks if referenced elsewhere (checked: only used in updateScene)
+      const lakes = [];
+      const mountains = [];
+
+      return { buildings, roads, lakes, mountains, boundaryExits, lakeMesh, mountainMesh };
+    }
+
+    // ===== Three.js 场景 =====
+    const container = document.getElementById('canvas-container');
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color('#08080f');
+
+    const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    container.appendChild(renderer.domElement);
+
+    const ambientLight = new THREE.AmbientLight(0x404050, 0.8);
+    scene.add(ambientLight);
+    const dirLight1 = new THREE.DirectionalLight(0xffffff, 1);
+    dirLight1.position.set(1, 2, 1).normalize().multiplyScalar(50);
+    scene.add(dirLight1);
+    const dirLight2 = new THREE.DirectionalLight(0x4466aa, 0.5);
+    dirLight2.position.set(-1, -1, -1).normalize().multiplyScalar(50);
+    scene.add(dirLight2);
+
+    const buildingGroup = new THREE.Group();
+    const roadGroup = new THREE.Group();
+    const lakeGroup = new THREE.Group();
+    const mountainGroup = new THREE.Group();
+    scene.add(buildingGroup);
+    scene.add(roadGroup);
+    scene.add(lakeGroup);
+    scene.add(mountainGroup);
+
+    let boundingBox = null;
+
+    // 选中和编辑相关
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2();
+    let selectedMesh = null;
+    let currentBuildings = []; // 当前生成的建筑数据
+    const customBuildingData = {}; // 存储用户自定义的建筑数据，key 是 "blockKey:buildingIndex"
+
+    // ===== 多区块管理 =====
+    // blocks: Map<string, { params, buildings, roads, lakes, boundaryExits }>
+    // key 格式: "bx,by,bz" (区块坐标)
+    // 每个区块存储自己的独立参数副本！
+    const blocks = new Map();
+    let currentBlockKey = '0,0,0'; // 当前选中/操作的区块
+    let selectedBlockKey = null; // 当前选中用于编辑参数的区块（null表示全局）
+
+    // 获取区块世界偏移
+    function getBlockOffset(blockKey) {
+      const [bx, by, bz] = blockKey.split(',').map(Number);
+      const gs = params.gridSize;
+      return { x: bx * gs, y: by * gs, z: bz * gs };
+    }
+
+    // 获取相邻区块的边界出口
+    function getAdjacentExits(blockKey) {
+      const [bx, by, bz] = blockKey.split(',').map(Number);
+      const adjacentExits = {};
+
+      // 检查六个方向的相邻区块
+      const directions = [
+        { key: '+x', adjacent: `${bx + 1},${by},${bz}`, opposite: '-x' },
+        { key: '-x', adjacent: `${bx - 1},${by},${bz}`, opposite: '+x' },
+        { key: '+y', adjacent: `${bx},${by + 1},${bz}`, opposite: '-y' },
+        { key: '-y', adjacent: `${bx},${by - 1},${bz}`, opposite: '+y' },
+        { key: '+z', adjacent: `${bx},${by},${bz + 1}`, opposite: '-z' },
+        { key: '-z', adjacent: `${bx},${by},${bz - 1}`, opposite: '+z' },
+      ];
+
+      for (const dir of directions) {
+        const adjacentBlock = blocks.get(dir.adjacent);
+        if (adjacentBlock && adjacentBlock.boundaryExits) {
+          // 相邻区块的出口就是本区块需要对接的入口
+          adjacentExits[dir.key] = adjacentBlock.boundaryExits[dir.opposite] || [];
+        }
+      }
+
+      return adjacentExits;
+    }
+
+    // 计算区块唯一种子
+    function getBlockSeed(baseSeed, blockKey) {
+      const [bx, by, bz] = blockKey.split(',').map(Number);
+      // 使用简单的哈希组合
+      return baseSeed + bx * 73856093 + by * 19349663 + bz * 83492791;
+    }
+
+    // 轨道控制
+    const orbit = { theta: Math.PI / 4, phi: Math.PI / 4, radius: 50, isDragging: false, lastX: 0, lastY: 0 };
+
+    function updateCamera() {
+      const { theta, phi, radius } = orbit;
+      camera.position.set(
+        radius * Math.sin(phi) * Math.cos(theta),
+        radius * Math.cos(phi),
+        radius * Math.sin(phi) * Math.sin(theta)
+      );
+      camera.lookAt(0, 0, 0);
+    }
+    updateCamera();
+
+    container.addEventListener('mousedown', e => { orbit.isDragging = true; orbit.lastX = e.clientX; orbit.lastY = e.clientY; });
+    window.addEventListener('mousemove', e => {
+      if (!orbit.isDragging) return;
+      orbit.theta += (e.clientX - orbit.lastX) * 0.005;
+      orbit.phi = Math.max(0.1, Math.min(Math.PI - 0.1, orbit.phi - (e.clientY - orbit.lastY) * 0.005));
+      orbit.lastX = e.clientX; orbit.lastY = e.clientY;
+      updateCamera();
+    });
+    window.addEventListener('mouseup', () => orbit.isDragging = false);
+    container.addEventListener('wheel', e => {
+      e.preventDefault();
+      orbit.radius = Math.max(10, Math.min(200, orbit.radius + e.deltaY * 0.05));
+      updateCamera();
+    }, { passive: false });
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    function animate() {
+      requestAnimationFrame(animate);
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    // ===== 建筑类型定义 =====
+    const BUILDING_TYPES = {
+      commercial: {
+        name: '商业',
+        hue: 0.58,
+        subtypes: {
+          '办公楼': { hue: 0.58 },
+          '商场': { hue: 0.55 },
+          '酒店': { hue: 0.52 },
+          '银行': { hue: 0.61 }
+        }
+      },
+      residential: {
+        name: '住宅',
+        hue: 0.35,
+        subtypes: {
+          '公寓': { hue: 0.35 },
+          '住宅楼': { hue: 0.38 },
+          '别墅': { hue: 0.32 }
+        }
+      },
+      industrial: {
+        name: '工业',
+        hue: 0.15,
+        subtypes: {
+          '工厂': { hue: 0.15 },
+          '仓库': { hue: 0.12 },
+          '物流': { hue: 0.18 }
+        }
+      },
+      public: {
+        name: '公共',
+        hue: 0.78,
+        subtypes: {
+          '政府': { hue: 0.78, sat: 0.4 },   // 紫灰 - 庄重
+          '医院': { hue: 0.0, sat: 0.7 },    // 红色 - 医疗
+          '学校': { hue: 0.12, sat: 0.8 },   // 橙色 - 教育
+          '图书馆': { hue: 0.65, sat: 0.5 }, // 青蓝 - 知识
+          '博物馆': { hue: 0.08, sat: 0.6 }, // 金色 - 文化
+          '体育馆': { hue: 0.42, sat: 0.7 }, // 青绿 - 运动
+          '剧院': { hue: 0.92, sat: 0.7 },   // 品红 - 艺术
+          '车站': { hue: 0.55, sat: 0.4 }    // 灰蓝 - 交通
+        }
+      },
+      landmark: {
+        name: '地标',
+        hue: 0.08,
+        subtypes: {
+          '地标塔': { hue: 0.08 },
+          '纪念碑': { hue: 0.05 }
+        }
+      },
+      mountain: {
+        name: '山地',
+        hue: 0.28,
+        subtypes: {
+          // 山顶建筑
+          '寺庙': { hue: 0.08, sat: 0.5 },     // 金红色
+          '神社': { hue: 0.02, sat: 0.7 },     // 朱红色
+          '観景台': { hue: 0.55, sat: 0.4 },   // 灰蓝色
+          '信号塔': { hue: 0.58, sat: 0.3 },   // 银灰色
+          // 山腰建筑
+          '度假村': { hue: 0.16, sat: 0.6 },   // 暖橙色
+          '山莊': { hue: 0.35, sat: 0.5 },     // 绿棕色
+          '別墅': { hue: 0.32, sat: 0.4 }      // 浅绿色
+        }
+      }
+    };
+
+    // ===== 参数与控件 =====
+    const params = {
+      seed: Math.floor(Math.random() * 9999), // 随机种子
+      gridSize: 36,
+      roadSpacing: 6, roadWidth: 1, roadOffset: 2, roadDensity: 1.0,
+      branchDensity: 0.15, branchFork: 0.15, branchMaxLen: 30, alleyMaxLen: 15,
+      roadPruneThreshold: 8, // 主干道至少接触N个建筑才保留
+      lakeThreshold: 0.30, lakeScale: 0.04,
+      mountainThreshold: 0.35, mountainScale: 0.03, mountainDensity: 0.20,
+      // 建筑密度参数
+      densityMode: 'radial', // radial, noise, uniform
+      centerDensity: 0.85, edgeDensity: 0.005, densityCurve: 'gaussian', densitySigma: 0.20, // 更新默认值
+      densityNoiseThreshold: 0.4, densityNoiseScale: 0.08, densityNoiseMax: 0.9, densityNoiseMin: 0,
+      densityUniform: 0.5,
+      // W高度参数
+      wMode: 'radial', // radial, noise, uniform
+      centerW: 1, edgeW: 0, wCurve: 'gaussian', wSigma: 0.4,
+      wNoiseScale: 0.12, wNoiseOffset: 0.5, wNoiseAmplitude: 0.5,
+      wUniform: 0.5,
+      wNoise: 0.3, // 随机扰动
+      // 显示参数
+      colorMode: 'height', // height, type
+      visibleTypes: { commercial: true, residential: true, industrial: true, public: true, landmark: true, mountain: true },
+      // 其他
+      minBuildingSize: 1, maxBuildingSize: 4,
+      buildingSize: 0.96, // 1 - padding
+      opacity: 0.9,       // DEPRECATED: legacy fallback
+      opacityBuilding: 1.0,
+      opacityRoad: 0.8,
+      opacityLake: 1.0,
+      opacityMountain: 0.6,
+
+      // 显示控制
+      showBuildings: true, showRoads: false, showLakes: false, showMountains: false
+    };
+
+    function updateScene(regenerateBlocks = true) {
+      // 清除旧对象
+      while (buildingGroup.children.length) {
+        const c = buildingGroup.children[0];
+        c.geometry?.dispose(); c.material?.dispose();
+        buildingGroup.remove(c);
+      }
+      while (roadGroup.children.length) {
+        const c = roadGroup.children[0];
+        c.geometry?.dispose(); c.material?.dispose();
+        roadGroup.remove(c);
+      }
+      while (lakeGroup.children.length) {
+        const c = lakeGroup.children[0];
+        c.geometry?.dispose(); c.material?.dispose();
+        lakeGroup.remove(c);
+      }
+      while (mountainGroup.children.length) {
+        const c = mountainGroup.children[0];
+        c.geometry?.dispose(); c.material?.dispose();
+        mountainGroup.remove(c);
+      }
+      if (boundingBox) { scene.remove(boundingBox); boundingBox.geometry?.dispose(); boundingBox.material?.dispose(); boundingBox = null; }
+
+      const gs = params.gridSize;
+
+      // 如果需要重新生成区块数据
+      if (regenerateBlocks) {
+        // 重新生成所有区块，使用当前全局params
+        const blockKeys = blocks.size > 0 ? Array.from(blocks.keys()) : ['0,0,0'];
+        blocks.clear();
+
+        for (const key of blockKeys) {
+          // 使用当前全局params生成所有区块（确保滑块调节生效）
+          const blockParams = JSON.parse(JSON.stringify(params));
+          const adjacentExits = getAdjacentExits(key);
+          const blockData = generateCity(blockParams, key, adjacentExits);
+          blockData.params = blockParams; // 存储区块参数
+          blocks.set(key, blockData);
+        }
+      }
+
+      // 收集所有建筑数据供编辑使用
+      currentBuildings = [];
+      blocks.forEach((blockData, blockKey) => {
+        blockData.buildings.forEach(b => {
+          currentBuildings.push({ ...b, blockKey });
+        });
+      });
+
+      // 清除选中状态
+      if (selectedMesh) {
+        selectedMesh = null;
+        document.getElementById('edit-panel').classList.remove('visible');
+      }
+
+      // 计算所有区块的边界
+      let minX = Infinity, maxX = -Infinity;
+      let minY = Infinity, maxY = -Infinity;
+      let minZ = Infinity, maxZ = -Infinity;
+
+      blocks.forEach((_, key) => {
+        const [bx, by, bz] = key.split(',').map(Number);
+        minX = Math.min(minX, bx * gs - gs / 2);
+        maxX = Math.max(maxX, bx * gs + gs / 2);
+        minY = Math.min(minY, by * gs - gs / 2);
+        maxY = Math.max(maxY, by * gs + gs / 2);
+        minZ = Math.min(minZ, bz * gs - gs / 2);
+        maxZ = Math.max(maxZ, bz * gs + gs / 2);
+      });
+
+      // 为每个区块创建边界框
+      blocks.forEach((_, key) => {
+        const offset = getBlockOffset(key);
+        const boxGeo = new THREE.BoxGeometry(gs, gs, gs);
+        const edges = new THREE.EdgesGeometry(boxGeo);
+        const box = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({
+          color: key === '0,0,0' ? 0x446688 : 0x334455,
+          transparent: true,
+          opacity: key === '0,0,0' ? 0.6 : 0.3
+        }));
+        box.position.set(offset.x, offset.y, offset.z);
+        scene.add(box);
+        if (!boundingBox) boundingBox = box; // 保存第一个用于后续清理
+      });
+
+      // 渲染所有区块的建筑
+      if (params.showBuildings) {
+        const typeCounts = { commercial: 0, residential: 0, industrial: 0, public: 0, landmark: 0 };
+
+        blocks.forEach((blockData, blockKey) => {
+          blockData.buildings.forEach(b => {
+            // 获取自定义数据（使用 blockKey:index 作为唯一标识）
+            const customKey = `${blockKey}:${b.originalIndex}`;
+            const custom = customBuildingData[customKey] || {};
+            const type = custom.type || b.type;
+            const subtype = custom.subtype || b.subtype;
+
+            // 类型筛选
+            if (!params.visibleTypes[type]) return;
+            typeCounts[type]++;
+
+            let color;
+            if (params.colorMode === 'height') {
+              const hue = 0.35 - b.wHeight * 0.35;
+              const sat = 0.6 + b.wHeight * 0.2;
+              const light = 0.4 + b.wHeight * 0.15;
+              color = new THREE.Color().setHSL(hue, sat, light);
+            } else {
+              const typeInfo = BUILDING_TYPES[type];
+              const subtypeInfo = typeInfo.subtypes[subtype] || { hue: typeInfo.hue };
+              const hue = subtypeInfo.hue;
+              const sat = subtypeInfo.sat || 0.65;
+              const light = 0.35 + b.wHeight * 0.25;
+              color = new THREE.Color().setHSL(hue, sat, light);
+            }
+
+            const geo = new THREE.BoxGeometry(b.sx, b.sy, b.sz);
+            const mat = new THREE.MeshStandardMaterial({ color, transparent: params.opacityBuilding < 1, opacity: params.opacityBuilding, metalness: 0.1, roughness: 0.85 });
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.position.set(b.x, b.y, b.z);
+            mesh.userData = {
+              type: type,
+              subtype: subtype,
+              buildingIndex: b.originalIndex,
+              blockKey: blockKey,
+              name: custom.name || '',
+              note: custom.note || ''
+            };
+            buildingGroup.add(mesh);
+          });
+        });
+      }
+
+      // 渲染所有区块的道路
+      if (params.showRoads) {
+        blocks.forEach((blockData) => {
+          blockData.roads.forEach(r => {
+            const color = new THREE.Color(0x556666);
+            const geo = new THREE.BoxGeometry(r.sx, r.sy, r.sz);
+            const mat = new THREE.MeshStandardMaterial({ color, transparent: params.opacityRoad < 1, opacity: params.opacityRoad, metalness: 0.1, roughness: 0.9 });
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.position.set(r.x, r.y, r.z);
+            roadGroup.add(mesh);
+          });
+        });
+      }
+
+      // 渲染所有区块的湖泊 (Mesh)
+      if (params.showLakes) {
+        blocks.forEach((blockData) => {
+          if (blockData.lakeMesh && blockData.lakeMesh.indices.length > 0) {
+            const m = blockData.lakeMesh;
+            const geo = new THREE.BufferGeometry();
+            geo.setAttribute('position', new THREE.BufferAttribute(m.vertices, 3));
+            geo.setIndex(new THREE.BufferAttribute(m.indices, 1));
+            geo.computeVertexNormals();
+
+            const color = new THREE.Color().setHSL(0.58, 0.7, 0.45);
+            // Smooth shading for lakes
+            const mat = new THREE.MeshStandardMaterial({
+              color,
+              transparent: params.opacityLake < 1,
+              opacity: params.opacityLake,
+              metalness: 0.3,
+              roughness: 0.2, // Smooth water
+              flatShading: false
+            });
+            const mesh = new THREE.Mesh(geo, mat);
+            lakeGroup.add(mesh);
+          } else if (blockData.lakes) {
+            // Fallback for old data if any (shouldn't happen with new gen)
+            blockData.lakes.forEach(l => {
+              const color = new THREE.Color().setHSL(0.58, 0.7, 0.45);
+              const geo = new THREE.BoxGeometry(l.sx * 0.98, l.sy * 0.98, l.sz * 0.98);
+              const mat = new THREE.MeshStandardMaterial({ color, transparent: params.opacityLake < 1, opacity: params.opacityLake, metalness: 0.3, roughness: 0.4 });
+              const mesh = new THREE.Mesh(geo, mat);
+              mesh.position.set(l.x, l.y, l.z);
+              lakeGroup.add(mesh);
+            });
+          }
+        });
+      }
+
+      // 渲染所有区块的山脉 (Mesh)
+      if (params.showMountains) {
+        blocks.forEach((blockData) => {
+          if (blockData.mountainMesh && blockData.mountainMesh.indices.length > 0) {
+            const m = blockData.mountainMesh;
+            const geo = new THREE.BufferGeometry();
+            geo.setAttribute('position', new THREE.BufferAttribute(m.vertices, 3));
+            geo.setIndex(new THREE.BufferAttribute(m.indices, 1));
+            geo.computeVertexNormals(); // Compute normals first
+
+            const color = new THREE.Color().setHSL(0.28, 0.5, 0.30); // Dark Green
+            // Flat shading for low-poly look
+            const mat = new THREE.MeshStandardMaterial({
+              color,
+              transparent: params.opacityMountain < 1,
+              opacity: params.opacityMountain,
+              metalness: 0.05,
+              roughness: 0.95,
+              flatShading: true
+            });
+            const mesh = new THREE.Mesh(geo, mat);
+            mountainGroup.add(mesh);
+          } else if (blockData.mountains) {
+            // Fallback
+            blockData.mountains.forEach(m => {
+              const color = new THREE.Color().setHSL(0.28, 0.5, 0.30);
+              const geo = new THREE.BoxGeometry(m.sx, m.sy, m.sz);
+              const mat = new THREE.MeshStandardMaterial({ color, transparent: params.opacityMountain < 1, opacity: params.opacityMountain, metalness: 0.05, roughness: 0.95 });
+              const mesh = new THREE.Mesh(geo, mat);
+              mesh.position.set(m.x, m.y, m.z);
+              mountainGroup.add(mesh);
+            });
+          }
+        });
+      }
+
+      // 根据区块数量调整相机距离
+      const blockCount = blocks.size;
+      const viewScale = Math.cbrt(blockCount); // 立方根缩放
+      orbit.radius = gs * 1.8 * Math.max(1, viewScale);
+      updateCamera();
+
+      // 更新统计
+      let totalBuildings = 0, totalRoads = 0, totalLakes = 0, totalMountains = 0;
+      blocks.forEach(blockData => {
+        totalBuildings += blockData.buildings.length;
+        totalRoads += blockData.roads.length;
+        totalLakes += blockData.lakes.length;
+        totalMountains += (blockData.mountains || []).length;
+      });
+
+      const statParts = [];
+      if (params.showBuildings) statParts.push(`${totalBuildings} 建筑`);
+      if (params.showRoads) statParts.push(`${totalRoads} 道路`);
+      if (params.showLakes) statParts.push(`${totalLakes} 湖泊`);
+      if (params.showMountains) statParts.push(`${totalMountains} 山脉`);
+      statParts.push(`${blockCount} 区块`);
+      document.getElementById('stats').textContent = statParts.join(' · ') || '无显示';
+
+      // 更新区块信息显示
+      updateBlockInfo();
+    }
+
+    // 更新区块按钮状态和信息
+    function updateBlockInfo() {
+      const blockCount = blocks.size;
+      document.getElementById('block-info').textContent = `当前: ${blockCount} 区块`;
+
+      // 更新各方向按钮状态
+      const dirs = ['+x', '-x', '+y', '-y', '+z', '-z'];
+      dirs.forEach(dir => {
+        const btn = document.querySelector(`.block-btn[data-dir="${dir}"]`);
+        if (btn) {
+          // 检查是否可以在该方向添加区块（基于现有区块）
+          let canAdd = false;
+          blocks.forEach((_, key) => {
+            const [bx, by, bz] = key.split(',').map(Number);
+            let newKey;
+            switch (dir) {
+              case '+x': newKey = `${bx + 1},${by},${bz}`; break;
+              case '-x': newKey = `${bx - 1},${by},${bz}`; break;
+              case '+y': newKey = `${bx},${by + 1},${bz}`; break;
+              case '-y': newKey = `${bx},${by - 1},${bz}`; break;
+              case '+z': newKey = `${bx},${by},${bz + 1}`; break;
+              case '-z': newKey = `${bx},${by},${bz - 1}`; break;
+            }
+            if (!blocks.has(newKey)) canAdd = true;
+          });
+          btn.disabled = !canAdd;
+          btn.style.opacity = canAdd ? '1' : '0.4';
+        }
+      });
+    }
+
+    // 控件绑定
+    const sliders = [
+      'seed', 'gridSize', 'roadSpacing', 'roadWidth', 'roadOffset', 'roadDensity', 'branchDensity', 'branchFork', 'branchMaxLen', 'alleyMaxLen', 'roadPruneThreshold',
+      'lakeThreshold', 'lakeScale', 'mountainThreshold', 'mountainScale', 'mountainDensity',
+      // 密度参数
+      'centerDensity', 'edgeDensity', 'densitySigma',
+      'densityNoiseThreshold', 'densityNoiseScale', 'densityNoiseMax', 'densityNoiseMin', 'densityUniform',
+      // W高度参数
+      'centerW', 'edgeW', 'wSigma',
+      'wNoiseScale', 'wNoiseOffset', 'wNoiseAmplitude', 'wUniform',
+      'wNoise',
+      // 其他
+      'buildingSize',
+      'opacityBuilding', 'opacityRoad', 'opacityLake', 'opacityMountain'
+    ];
+
+    sliders.forEach(id => {
+      const el = document.getElementById(id);
+      el.addEventListener('input', () => {
+        // 只更新显示值，不重绘
+        updateDisplayValue(id, el.value);
+      });
+      el.addEventListener('change', () => {
+        // 松手时才更新参数并重绘
+        updateParam(id, el.value);
+        updateScene();
+      });
+    });
+
+    function updateDisplayValue(id, value) {
+      const valEl = document.getElementById('val-' + id);
+      if (!valEl) return;
+      switch (id) {
+        case 'seed': valEl.textContent = value; break;
+        case 'gridSize': valEl.textContent = value + '³'; break;
+        case 'roadSpacing': case 'roadWidth': case 'branchMaxLen': case 'alleyMaxLen': valEl.textContent = value; break;
+        case 'roadDensity': case 'branchDensity': case 'branchFork': valEl.textContent = Math.round(value * 100) + '%'; break;
+        case 'lakeThreshold': valEl.textContent = Math.round(value * 100) + '%'; break;
+        case 'lakeScale': valEl.textContent = parseFloat(value).toFixed(2); break;
+        case 'mountainThreshold': valEl.textContent = Math.round(value * 100) + '%'; break;
+        case 'mountainScale': valEl.textContent = parseFloat(value).toFixed(2); break;
+        case 'mountainDensity': valEl.textContent = Math.round(value * 100) + '%'; break;
+        case 'densityNoiseScale': case 'wNoiseScale': valEl.textContent = parseFloat(value).toFixed(2); break;
+        case 'centerDensity': case 'edgeDensity': valEl.textContent = (value * 100).toFixed(1) + '%'; break;
+        case 'densitySigma': case 'wSigma': valEl.textContent = parseFloat(value).toFixed(2); break;
+        case 'densityNoiseThreshold': case 'densityNoiseMax': case 'densityUniform': valEl.textContent = Math.round(value * 100) + '%'; break;
+        case 'densityNoiseMin': valEl.textContent = (value * 100).toFixed(1) + '%'; break;
+        case 'centerW': case 'edgeW': case 'wNoiseOffset': case 'wNoiseAmplitude': case 'wUniform': valEl.textContent = Math.round(value * 100) + '%'; break;
+        case 'wNoise': valEl.textContent = Math.round(value * 100) + '%'; break;
+        case 'buildingSize': valEl.textContent = '1-' + value; break;
+        case 'wNoise': valEl.textContent = Math.round(value * 100) + '%'; break;
+        case 'buildingSize': valEl.textContent = '1-' + value; break;
+        case 'opacityBuilding': valEl.textContent = Math.round(value * 100) + '%'; break;
+        case 'opacityRoad': valEl.textContent = Math.round(value * 100) + '%'; break;
+        case 'opacityLake': valEl.textContent = Math.round(value * 100) + '%'; break;
+        case 'opacityMountain': valEl.textContent = Math.round(value * 100) + '%'; break;
+        case 'roadPruneThreshold': valEl.textContent = value; break;
+        case 'roadOffset': valEl.textContent = value; break;
+      }
+    }
+
+    function updateParam(id, value) {
+      switch (id) {
+        case 'seed': params.seed = parseInt(value); break;
+        case 'gridSize': params.gridSize = parseInt(value); break;
+        case 'roadSpacing': params.roadSpacing = parseInt(value); break;
+        case 'roadWidth': params.roadWidth = parseInt(value); break;
+        case 'roadOffset': params.roadOffset = parseInt(value); break;
+        case 'roadDensity': params.roadDensity = parseFloat(value); break;
+        case 'branchDensity': params.branchDensity = parseFloat(value); break;
+        case 'branchFork': params.branchFork = parseFloat(value); break;
+        case 'branchMaxLen': params.branchMaxLen = parseInt(value); break;
+        case 'alleyMaxLen': params.alleyMaxLen = parseInt(value); break;
+        case 'lakeThreshold': params.lakeThreshold = parseFloat(value); break;
+        case 'lakeScale': params.lakeScale = parseFloat(value); break;
+        case 'mountainThreshold': params.mountainThreshold = parseFloat(value); break;
+        case 'mountainScale': params.mountainScale = parseFloat(value); break;
+        case 'mountainDensity': params.mountainDensity = parseFloat(value); break;
+        // 密度参数
+        case 'centerDensity': params.centerDensity = parseFloat(value); break;
+        case 'edgeDensity': params.edgeDensity = parseFloat(value); break;
+        case 'densitySigma': params.densitySigma = parseFloat(value); break;
+        case 'densityNoiseThreshold': params.densityNoiseThreshold = parseFloat(value); break;
+        case 'densityNoiseScale': params.densityNoiseScale = parseFloat(value); break;
+        case 'densityNoiseMax': params.densityNoiseMax = parseFloat(value); break;
+        case 'densityNoiseMin': params.densityNoiseMin = parseFloat(value); break;
+        case 'densityUniform': params.densityUniform = parseFloat(value); break;
+        // W高度参数
+        case 'centerW': params.centerW = parseFloat(value); break;
+        case 'edgeW': params.edgeW = parseFloat(value); break;
+        case 'wSigma': params.wSigma = parseFloat(value); break;
+        case 'wNoiseScale': params.wNoiseScale = parseFloat(value); break;
+        case 'wNoiseOffset': params.wNoiseOffset = parseFloat(value); break;
+        case 'wNoiseAmplitude': params.wNoiseAmplitude = parseFloat(value); break;
+        case 'wUniform': params.wUniform = parseFloat(value); break;
+        case 'wNoise': params.wNoise = parseFloat(value); break;
+        // 其他
+        case 'buildingSize': params.maxBuildingSize = parseInt(value); break;
+        case 'buildingSize': params.maxBuildingSize = parseInt(value); break;
+        case 'opacityBuilding': params.opacityBuilding = parseFloat(value); break;
+        case 'opacityRoad': params.opacityRoad = parseFloat(value); break;
+        case 'opacityLake': params.opacityLake = parseFloat(value); break;
+        case 'opacityMountain': params.opacityMountain = parseFloat(value); break;
+        case 'roadPruneThreshold': params.roadPruneThreshold = parseInt(value); break;
+      }
+    }
+
+    // 折叠面板
+    let collapsed = false;
+    document.getElementById('panel-header').addEventListener('click', () => {
+      collapsed = !collapsed;
+      document.getElementById('panel').classList.toggle('collapsed', collapsed);
+      document.getElementById('panel-content').classList.toggle('hidden', collapsed);
+      document.getElementById('arrow').textContent = collapsed ? '▶' : '▼';
+    });
+
+    // 建筑/道路/湖泊切换
+    document.getElementById('btn-buildings').addEventListener('click', function () {
+      params.showBuildings = !params.showBuildings;
+      this.classList.toggle('active', params.showBuildings);
+      updateScene();
+    });
+    document.getElementById('btn-roads').addEventListener('click', function () {
+      params.showRoads = !params.showRoads;
+      this.classList.toggle('active', params.showRoads);
+      updateScene();
+    });
+
+    // 更新图例显示
+    function updateLegend() {
+      const legend = document.getElementById('legend');
+      const { visibleTypes, colorMode } = params;
+      // 只有当颜色模式是"类型"且只显示公共建筑时才显示图例
+      const onlyPublic = visibleTypes.public &&
+        !visibleTypes.commercial &&
+        !visibleTypes.residential &&
+        !visibleTypes.industrial &&
+        !visibleTypes.landmark;
+      legend.classList.toggle('visible', colorMode === 'type' && onlyPublic);
+    }
+
+    // 颜色模式切换
+    document.querySelectorAll('#color-mode-group .mode-btn').forEach(btn => {
+      btn.addEventListener('click', function () {
+        document.querySelectorAll('#color-mode-group .mode-btn').forEach(b => b.classList.remove('active'));
+        this.classList.add('active');
+        params.colorMode = this.dataset.mode;
+        updateLegend();
+        updateScene();
+      });
+    });
+
+    // 类型筛选
+    document.querySelectorAll('#type-filter .type-btn').forEach(btn => {
+      btn.addEventListener('click', function () {
+        const type = this.dataset.type;
+        params.visibleTypes[type] = !params.visibleTypes[type];
+        this.classList.toggle('active', params.visibleTypes[type]);
+        updateLegend();
+        updateScene();
+      });
+    });
+
+    document.getElementById('btn-lakes').addEventListener('click', function () {
+      params.showLakes = !params.showLakes;
+      this.classList.toggle('active', params.showLakes);
+      updateScene();
+    });
+
+    document.getElementById('btn-mountains').addEventListener('click', function () {
+      params.showMountains = !params.showMountains;
+      this.classList.toggle('active', params.showMountains);
+      updateScene();
+    });
+
+    // 密度曲线选择
+    document.querySelectorAll('#density-curves .curve-btn').forEach(btn => {
+      btn.addEventListener('click', function () {
+        document.querySelectorAll('#density-curves .curve-btn').forEach(b => b.classList.remove('active'));
+        this.classList.add('active');
+        params.densityCurve = this.dataset.curve;
+        updateScene();
+      });
+    });
+
+    // W高度曲线选择
+    document.querySelectorAll('#w-curves .curve-btn').forEach(btn => {
+      btn.addEventListener('click', function () {
+        document.querySelectorAll('#w-curves .curve-btn').forEach(b => b.classList.remove('active'));
+        this.classList.add('active');
+        params.wCurve = this.dataset.curve;
+        updateScene();
+      });
+    });
+
+    // 模式切换辅助函数
+    function updateModeParams(prefix, mode) {
+      ['radial', 'noise', 'uniform'].forEach(m => {
+        const el = document.getElementById(`${prefix}-${m}-params`);
+        if (el) el.classList.toggle('visible', m === mode);
+      });
+    }
+
+    // 密度模式切换
+    document.querySelectorAll('#density-mode-group .mode-btn').forEach(btn => {
+      btn.addEventListener('click', function () {
+        document.querySelectorAll('#density-mode-group .mode-btn').forEach(b => b.classList.remove('active'));
+        this.classList.add('active');
+        params.densityMode = this.dataset.mode;
+        updateModeParams('density', params.densityMode);
+        updateScene();
+      });
+    });
+
+    // W高度模式切换
+    document.querySelectorAll('#w-mode-group .mode-btn').forEach(btn => {
+      btn.addEventListener('click', function () {
+        document.querySelectorAll('#w-mode-group .mode-btn').forEach(b => b.classList.remove('active'));
+        this.classList.add('active');
+        params.wMode = this.dataset.mode;
+        updateModeParams('w', params.wMode);
+        updateScene();
+      });
+    });
+
+    // 随机
+    document.getElementById('random-btn').addEventListener('click', () => {
+      const newSeed = Math.floor(Math.random() * 9999);
+      params.seed = newSeed;
+      document.getElementById('seed').value = newSeed;
+      document.getElementById('val-seed').textContent = newSeed;
+      // 重新生成时清空自定义数据
+      Object.keys(customBuildingData).forEach(k => delete customBuildingData[k]);
+      updateScene();
+    });
+
+    // ===== 点击选中建筑 =====
+    const editPanel = document.getElementById('edit-panel');
+    const editType = document.getElementById('edit-type');
+    const editSubtype = document.getElementById('edit-subtype');
+    const editName = document.getElementById('edit-name');
+    const editNote = document.getElementById('edit-note');
+    const editPos = document.getElementById('edit-pos');
+    const editSize = document.getElementById('edit-size');
+
+    // ===== 随机日式名称生成器 =====
+    const JapaneseNameGenerator = {
+      prefixes: [
+        '樱', '藤', '松', '竹', '梅', '菊', '莲', '桃', '葵', '桐',
+        '东', '西', '南', '北', '中', '上', '下',
+        '新', '古', '元', '本', '大', '小',
+        '高', '天', '海', '河', '山', '谷', '岛', '星', '月', '日', '光', '影',
+        '神', '圣', '龙', '虎', '凤', '鹤', '龟',
+        '青', '赤', '白', '黑', '金', '银',
+        '平和', '希望', '未来', '繁荣', '荣光', '辉煌', '永恒', '无限'
+      ],
+
+      suffixes: {
+        commercial: ['百货', '广场', '大厦', '中心', '商事', '市场', '通', '一番街', '前', '本店'],
+        residential: ['庄', '馆', '公寓', '华庭', '公馆', '御殿', '居', '邸', '台', '丘'],
+        industrial: ['重工', '制作所', '工业', '科技', '化学', '制药', '物流', '仓库', '电力', '能源'],
+        public: ['厅', '局', '院', '署', '会馆', '学园', '高校', '大学', '中心', '站'],
+        landmark: ['塔', '天空树', '之眼', '方舟', '之门', '大桥', '纪念碑', '像'],
+        mountain: ['寺', '神社', '宫', '院', '庵', '岳', '峰', '山庄', '旅馆', '展望台']
+      },
+
+      generate(type, subtype) {
+        // 特殊处理一些子类型
+        let suffixList = this.suffixes[type] || ['建筑'];
+
+        if (subtype === '神社') suffixList = ['神社', '大社', '神宫'];
+        else if (subtype === '寺庙') suffixList = ['寺', '院', '庵', '堂'];
+        else if (subtype === '学校') suffixList = ['学园', '高校', '大学', '学院'];
+        else if (subtype === '医院') suffixList = ['医院', '诊所', '医疗中心'];
+
+        const prefix = this.prefixes[Math.floor(Math.random() * this.prefixes.length)];
+        // 50% chance for a second prefix character for more variety
+        const prefix2 = Math.random() > 0.5 ? this.prefixes[Math.floor(Math.random() * this.prefixes.length)] : '';
+        const suffix = suffixList[Math.floor(Math.random() * suffixList.length)];
+
+        return prefix + prefix2 + suffix;
+      }
+    };
+
+    // 子类型选项映射
+    const subtypeOptions = {
+      commercial: ['购物中心', '写字楼', '酒店', '餐饮'],
+      residential: ['别墅', '公寓', '住宅楼'],
+      industrial: ['工厂', '仓库', '物流'],
+      public: ['政府', '医院', '学校', '图书馆', '博物馆', '体育馆', '剧院', '车站'],
+      landmark: ['地标塔', '纪念碑'],
+      mountain: ['度假村', '山莊', '別墅', '寺庙', '神社', '観景台', '信号塔']
+    };
+
+    function updateSubtypeOptions(type) {
+      editSubtype.innerHTML = '';
+      (subtypeOptions[type] || []).forEach(st => {
+        const opt = document.createElement('option');
+        opt.value = st;
+        opt.textContent = st;
+        editSubtype.appendChild(opt);
+      });
+    }
+
+    editType.addEventListener('change', () => {
+      updateSubtypeOptions(editType.value);
+      saveEditData();
+    });
+    editSubtype.addEventListener('change', saveEditData);
+    editName.addEventListener('input', saveEditData);
+    editNote.addEventListener('input', saveEditData);
+
+    function saveEditData() {
+      if (!selectedMesh) return;
+      const idx = selectedMesh.userData.buildingIndex;
+      const blockKey = selectedMesh.userData.blockKey || '0,0,0';
+      if (idx === undefined) return;
+
+      // 使用 blockKey:index 作为唯一标识
+      const customKey = `${blockKey}:${idx}`;
+      if (!customBuildingData[customKey]) customBuildingData[customKey] = {};
+      customBuildingData[customKey].type = editType.value;
+      customBuildingData[customKey].subtype = editSubtype.value;
+      customBuildingData[customKey].name = editName.value;
+      customBuildingData[customKey].note = editNote.value;
+
+      // 更新 mesh 的 userData
+      selectedMesh.userData.type = editType.value;
+      selectedMesh.userData.subtype = editSubtype.value;
+      selectedMesh.userData.name = editName.value;
+      selectedMesh.userData.note = editNote.value;
+
+      // 更新颜色
+      if (params.colorMode === 'type') {
+        const typeInfo = BUILDING_TYPES[editType.value];
+        const subtypeInfo = typeInfo.subtypes[editSubtype.value] || { hue: typeInfo.hue };
+        const b = currentBuildings.find(b => b.originalIndex === idx && b.blockKey === blockKey);
+        const light = 0.35 + (b ? b.wHeight : 0.5) * 0.25;
+        selectedMesh.material.color.setHSL(subtypeInfo.hue, subtypeInfo.sat || 0.65, light);
+      }
+    }
+
+    function showEditPanel(mesh) {
+      const idx = mesh.userData.buildingIndex;
+      const blockKey = mesh.userData.blockKey || '0,0,0';
+      const building = currentBuildings.find(b => b.originalIndex === idx && b.blockKey === blockKey);
+      if (!building) return;
+
+      const customKey = `${blockKey}:${idx}`;
+      const custom = customBuildingData[customKey] || {};
+      const type = custom.type || building.type;
+      const subtype = custom.subtype || building.subtype;
+
+      editType.value = type;
+      updateSubtypeOptions(type);
+      editSubtype.value = subtype;
+
+      // Auto-generate name if missing
+      if (!custom.name && !building.name) {
+        custom.name = JapaneseNameGenerator.generate(type, subtype);
+        // Save immediately to persist
+        if (!customBuildingData[customKey]) customBuildingData[customKey] = {};
+        customBuildingData[customKey].name = custom.name;
+        // Copy other props if new entry
+        if (!customBuildingData[customKey].type) customBuildingData[customKey].type = type;
+        if (!customBuildingData[customKey].subtype) customBuildingData[customKey].subtype = subtype;
+      }
+
+      editName.value = custom.name || '';
+      editNote.value = custom.note || '';
+      editPos.textContent = `(${building.gridX}, ${building.gridY}, ${building.gridZ})${blockKey !== '0,0,0' ? ` @${blockKey}` : ''}`;
+      editSize.textContent = `${building.sx}×${building.sy}×${building.sz}`;
+
+      editPanel.classList.add('visible');
+    }
+
+    // 高亮选中
+    let originalColor = null;
+    function selectBuilding(mesh) {
+      // 取消之前的选中
+      if (selectedMesh && selectedMesh !== mesh) {
+        if (originalColor) selectedMesh.material.color.copy(originalColor);
+        selectedMesh.material.emissive.setHex(0x000000);
+      }
+
+      if (mesh) {
+        selectedMesh = mesh;
+        originalColor = mesh.material.color.clone();
+        mesh.material.emissive.setHex(0x333366);
+        showEditPanel(mesh);
+      } else {
+        selectedMesh = null;
+        originalColor = null;
+        editPanel.classList.remove('visible');
+      }
+    }
+
+    // 点击检测
+    container.addEventListener('click', (e) => {
+      // 防止拖拽时误触发
+      if (Math.abs(e.clientX - orbit.lastX) > 5 || Math.abs(e.clientY - orbit.lastY) > 5) return;
+
+      mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+      mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+
+      raycaster.setFromCamera(mouse, camera);
+      const intersects = raycaster.intersectObjects(buildingGroup.children);
+
+      if (intersects.length > 0) {
+        const mesh = intersects[0].object;
+        selectBuilding(mesh);
+        // 同时选中该建筑所属的区块
+        const blockKey = mesh.userData.blockKey || '0,0,0';
+        if (blockKey !== selectedBlockKey) {
+          selectBlock(blockKey);
+        }
+      } else {
+        selectBuilding(null);
+      }
+    });
+
+    // 关闭编辑面板
+    document.getElementById('edit-close').addEventListener('click', () => {
+      selectBuilding(null);
+    });
+
+    // ===== 区块扩展功能 =====
+    let blockExtendMode = 'extend'; // 'extend' = 单向延伸, 'expand' = 批量扩展
+
+    // 更新区块信息显示
+    function updateBlockInfo() {
+      document.getElementById('block-info').textContent = `共 ${blocks.size} 区块`;
+      const selInfo = selectedBlockKey
+        ? `选中: ${selectedBlockKey}`
+        : '选中: 全局';
+      document.getElementById('selected-block-info').textContent = selInfo;
+
+      // 更新选中按钮状态
+      const selectBtn = document.getElementById('btn-select-block');
+      selectBtn.classList.toggle('active', selectedBlockKey !== null);
+    }
+
+    // 计算从某区块向某方向的新区块key
+    function getNewBlockKey(fromKey, direction) {
+      const [bx, by, bz] = fromKey.split(',').map(Number);
+      switch (direction) {
+        case '+x': return `${bx + 1},${by},${bz}`;
+        case '-x': return `${bx - 1},${by},${bz}`;
+        case '+y': return `${bx},${by + 1},${bz}`;
+        case '-y': return `${bx},${by - 1},${bz}`;
+        case '+z': return `${bx},${by},${bz + 1}`;
+        case '-z': return `${bx},${by},${bz - 1}`;
+      }
+      return null;
+    }
+
+    // 单向延伸：从当前选中的区块向指定方向添加一个新区块
+    function extendBlock(direction) {
+      const fromKey = selectedBlockKey || '0,0,0';
+      const newKey = getNewBlockKey(fromKey, direction);
+
+      if (!newKey || blocks.has(newKey)) {
+        console.log('该位置已有区块');
+        return;
+      }
+
+      // 新区块使用当前全局params作为初始参数（深拷贝）
+      const newBlockParams = JSON.parse(JSON.stringify(params));
+      // 保持种子不变，确保地形连续！
+      // newBlockParams.seed = params.seed + blocks.size * 1000;
+
+      const adjacentExits = getAdjacentExits(newKey);
+      const blockData = generateCity(newBlockParams, newKey, adjacentExits);
+      blockData.params = newBlockParams; // 存储区块独立参数
+      blocks.set(newKey, blockData);
+
+      // 选中新区块
+      selectedBlockKey = newKey;
+
+      updateScene(false);
+      updateBlockInfo();
+    }
+
+    // 批量扩展：向某方向扩展所有边界区块
+    function expandAllBlocks(direction) {
+      const newBlockKeys = new Set();
+
+      blocks.forEach((_, key) => {
+        const newKey = getNewBlockKey(key, direction);
+        if (newKey && !blocks.has(newKey)) {
+          newBlockKeys.add(newKey);
+        }
+      });
+
+      if (newBlockKeys.size === 0) return;
+
+      // 为每个新区块生成数据
+      newBlockKeys.forEach(newKey => {
+        const newBlockParams = JSON.parse(JSON.stringify(params));
+        // 保持种子不变，确保地形连续
+        // newBlockParams.seed = params.seed + blocks.size * 1000 + Math.random() * 100;
+
+        const adjacentExits = getAdjacentExits(newKey);
+        const blockData = generateCity(newBlockParams, newKey, adjacentExits);
+        blockData.params = newBlockParams;
+        blocks.set(newKey, blockData);
+      });
+
+      updateScene(false);
+      updateBlockInfo();
+    }
+
+    // 处理区块方向按钮点击
+    function handleBlockDirection(direction) {
+      if (blockExtendMode === 'extend') {
+        extendBlock(direction);
+      } else {
+        expandAllBlocks(direction);
+      }
+    }
+
+    // 选择区块（通过建筑选择）
+    function selectBlock(blockKey) {
+      if (blockKey === selectedBlockKey) {
+        // 取消选择
+        selectedBlockKey = null;
+      } else {
+        selectedBlockKey = blockKey;
+      }
+      updateBlockInfo();
+    }
+
+    // 重新生成选中区块
+    function regenerateSelectedBlock() {
+      const key = selectedBlockKey;
+      if (!key || !blocks.has(key)) {
+        console.log('没有选中的区块或区块不存在');
+        return;
+      }
+
+      // 使用当前全局params重新生成该区块
+      const blockParams = JSON.parse(JSON.stringify(params));
+      const adjacentExits = getAdjacentExits(key);
+      const blockData = generateCity(blockParams, key, adjacentExits);
+      blockData.params = blockParams;
+      blocks.set(key, blockData);
+
+      updateScene(false);
+    }
+
+    // 删除选中区块
+    function deleteSelectedBlock() {
+      const key = selectedBlockKey;
+      if (!key || key === '0,0,0') {
+        console.log('不能删除原点区块');
+        return;
+      }
+
+      blocks.delete(key);
+      selectedBlockKey = null;
+
+      updateScene(false);
+      updateBlockInfo();
+    }
+
+    // 模式切换按钮
+    document.getElementById('btn-mode-extend').addEventListener('click', () => {
+      blockExtendMode = 'extend';
+      document.getElementById('btn-mode-extend').classList.add('active');
+      document.getElementById('btn-mode-expand').classList.remove('active');
+    });
+
+    document.getElementById('btn-mode-expand').addEventListener('click', () => {
+      blockExtendMode = 'expand';
+      document.getElementById('btn-mode-expand').classList.add('active');
+      document.getElementById('btn-mode-extend').classList.remove('active');
+    });
+
+    // 区块方向按钮事件
+    document.querySelectorAll('.block-btn[data-dir]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const dir = btn.dataset.dir;
+        if (dir) handleBlockDirection(dir);
+      });
+    });
+
+    // 选择区块按钮（取消选择）
+    document.getElementById('btn-select-block').addEventListener('click', () => {
+      selectBlock(null);
+    });
+
+    // 应用当前参数到选中区块
+    function applyParamsToSelectedBlock() {
+      const key = selectedBlockKey;
+      if (!key) {
+        console.log('没有选中的区块');
+        return;
+      }
+
+      const blockData = blocks.get(key);
+      if (!blockData) return;
+
+      // 复制当前全局params到该区块
+      blockData.params = JSON.parse(JSON.stringify(params));
+
+      // 重新生成该区块
+      const adjacentExits = getAdjacentExits(key);
+      const newBlockData = generateCity(blockData.params, key, adjacentExits);
+      newBlockData.params = blockData.params;
+      blocks.set(key, newBlockData);
+
+      updateScene(false);
+    }
+
+    // 从选中区块加载参数到面板
+    function loadParamsFromSelectedBlock() {
+      const key = selectedBlockKey;
+      if (!key) return;
+
+      const blockData = blocks.get(key);
+      if (!blockData || !blockData.params) return;
+
+      // 复制区块参数到全局params
+      Object.assign(params, blockData.params);
+      syncUIFromParams();
+    }
+
+    // 应用参数按钮
+    document.getElementById('btn-apply-params').addEventListener('click', applyParamsToSelectedBlock);
+
+    // 加载参数按钮
+    document.getElementById('btn-load-params').addEventListener('click', loadParamsFromSelectedBlock);
+
+    // 重生成按钮
+    document.getElementById('btn-regen-block').addEventListener('click', regenerateSelectedBlock);
+
+    // 删除区块按钮
+    document.getElementById('btn-delete-block').addEventListener('click', deleteSelectedBlock);
+
+    // 清除扩展区块按钮
+    document.getElementById('btn-clear-blocks').addEventListener('click', () => {
+      if (blocks.size <= 1) return;
+
+      // 只保留原点区块
+      const originData = blocks.get('0,0,0');
+      blocks.clear();
+      if (originData) {
+        blocks.set('0,0,0', originData);
+      }
+
+      selectedBlockKey = null;
+      updateScene(false);
+      updateBlockInfo();
+    });
+
+    // ===== 导出/导入功能 =====
+    document.getElementById('btn-export').addEventListener('click', () => {
+      // 收集每个区块的参数
+      const blockParamsMap = {};
+      blocks.forEach((blockData, key) => {
+        if (blockData.params) {
+          blockParamsMap[key] = blockData.params;
+        }
+      });
+
+      const exportData = {
+        version: 3,
+        params: { ...params }, // 全局默认参数
+        blockKeys: Array.from(blocks.keys()),
+        blockParams: blockParamsMap, // 每个区块的独立参数
+        customBuildingData: { ...customBuildingData }
+      };
+
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `4d-city-${params.seed}-${blocks.size}blocks.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+
+    const importFile = document.getElementById('import-file');
+    document.getElementById('btn-import').addEventListener('click', () => {
+      importFile.click();
+    });
+
+    importFile.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        try {
+          const data = JSON.parse(evt.target.result);
+          if (data.version !== 1 && data.version !== 2 && data.version !== 3) throw new Error('不支持的版本');
+
+          // 恢复全局参数
+          Object.assign(params, data.params);
+
+          // 恢复自定义数据
+          Object.keys(customBuildingData).forEach(k => delete customBuildingData[k]);
+          Object.assign(customBuildingData, data.customBuildingData || {});
+
+          // 恢复区块
+          blocks.clear();
+          const blockKeys = data.blockKeys || ['0,0,0'];
+          const blockParamsMap = data.blockParams || {}; // 版本3新增
+
+          blockKeys.forEach(key => {
+            // 使用区块独立参数（如果有），否则使用全局params
+            const blockParams = blockParamsMap[key] || JSON.parse(JSON.stringify(params));
+            const adjacentExits = getAdjacentExits(key);
+            const blockData = generateCity(blockParams, key, adjacentExits);
+            blockData.params = blockParams;
+            blocks.set(key, blockData);
+          });
+
+          // 更新UI控件
+          syncUIFromParams();
+
+          // 重新渲染场景（不重新生成）
+          updateScene(false);
+          updateBlockInfo();
+
+        } catch (err) {
+          alert('导入失败: ' + err.message);
+        }
+      };
+      reader.readAsText(file);
+      e.target.value = ''; // 允许重复选择同一文件
+    });
+
+    // 同步UI控件到当前参数
+    function syncUIFromParams() {
+      // 数值控件
+      const numericControls = [
+        'seed', 'gridSize', 'roadSpacing', 'roadWidth', 'roadDensity', 'branchDensity', 'branchFork', 'branchMaxLen', 'alleyMaxLen',
+        'lakeThreshold', 'lakeScale',
+        'centerDensity', 'edgeDensity', 'densitySigma', 'densityNoiseThreshold', 'densityNoiseScale', 'densityNoiseMax', 'densityNoiseMin', 'densityUniform',
+        'centerW', 'edgeW', 'wSigma', 'wNoiseScale', 'wNoiseOffset', 'wNoiseAmplitude', 'wUniform', 'wNoise',
+        'opacity'
+      ];
+      numericControls.forEach(id => {
+        const el = document.getElementById(id);
+        if (el && params[id] !== undefined) {
+          el.value = params[id];
+          updateDisplayValue(id, params[id]);
+        }
+      });
+
+      // 建筑大小（合并的滑块）
+      const sizeEl = document.getElementById('buildingSize');
+      if (sizeEl) {
+        sizeEl.value = params.maxBuildingSize;
+        updateDisplayValue('buildingSize', params.maxBuildingSize);
+      }
+
+      // 模式按钮
+      document.querySelectorAll('#density-mode-group .mode-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.mode === params.densityMode);
+      });
+      updateModeParams('density', params.densityMode);
+
+      document.querySelectorAll('#w-mode-group .mode-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.mode === params.wMode);
+      });
+      updateModeParams('w', params.wMode);
+
+      // 曲线按钮
+      document.querySelectorAll('#density-curves .curve-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.curve === params.densityCurve);
+      });
+      document.querySelectorAll('#w-curves .curve-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.curve === params.wCurve);
+      });
+
+      // 颜色模式
+      document.querySelectorAll('#color-mode-group .mode-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.mode === params.colorMode);
+      });
+
+      // 显示类型
+      Object.keys(params.visibleTypes).forEach(type => {
+        const btn = document.querySelector(`#type-filter .type-btn[data-type="${type}"]`);
+        if (btn) btn.classList.toggle('active', params.visibleTypes[type]);
+      });
+
+      // 显示切换按钮
+      document.getElementById('btn-buildings').classList.toggle('active', params.showBuildings);
+      document.getElementById('btn-roads').classList.toggle('active', params.showRoads);
+      document.getElementById('btn-lakes').classList.toggle('active', params.showLakes);
+
+      // 更新图例
+      updateLegend();
+    }
+
+    // 初始化：同步UI控件到随机生成的默认参数
+    syncUIFromParams();
+    updateScene();
+  </script>
+</body>
+
+</html>

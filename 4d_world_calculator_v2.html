@@ -1,0 +1,864 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>四维世界参数计算器</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body>
+    <div id="root"></div>
+    
+    <script type="text/babel">
+const { useState, useMemo, useEffect } = React;
+
+// 数字输入组件：允许清空显示，但只在有效数字时更新外部状态
+const NumInput = ({ value, onChange, ...props }) => {
+  const [localValue, setLocalValue] = useState(String(value));
+  
+  // 外部 value 变化时同步显示（如点击预设按钮）
+  useEffect(() => {
+    setLocalValue(String(value));
+  }, [value]);
+  
+  const handleChange = (e) => {
+    const val = e.target.value;
+    setLocalValue(val); // 总是更新显示（允许空）
+    if (val !== '' && !isNaN(Number(val))) {
+      onChange(Number(val)); // 只在有效数字时更新外部状态
+    }
+  };
+  
+  return <input type="number" value={localValue} onChange={handleChange} {...props} />;
+};
+
+const FourDWorldCalculator = () => {
+  // 用户可调参数 - 使用地球真实参数作为初始值
+  const [planetRadius, setPlanetRadius] = useState(6371); // km (地球真实值)
+  const [surfaceGravity, setSurfaceGravity] = useState(9.81); // m/s² (地球真实值)
+  const [sunAngularSize, setSunAngularSize] = useState(0.53); // degrees (地球真实值)
+  const [sunRadius, setSunRadius] = useState(696000); // km (太阳真实值)
+  
+  // 粒子质量比：恒星平均粒子质量 / 行星平均粒子质量
+  // 三维真实值：太阳(氢氦,平均~2) / 地球(重元素,平均~25) ≈ 0.08
+  const [particleMassRatio, setParticleMassRatio] = useState(0.08);
+  
+  // 粒子间距比：恒星粒子间距 / 行星粒子间距
+  // 三维真实值：从密度比0.256和粒子质量比0.08反推 = (0.08/0.256)^(1/3) ≈ 0.68
+  // 太阳虽是等离子体，但高压使间距反而更小
+  const [particleSpacingRatio, setParticleSpacingRatio] = useState(0.68);
+  
+  // 目标质量比（用户可直接设置，会反推调整间距比）
+  const [targetMassRatio, setTargetMassRatio] = useState(333000);
+  
+  const [sunTemperature, setSunTemperature] = useState(5778); // K (太阳表面温度)
+  const [moonOrbitalRadius, setMoonOrbitalRadius] = useState(384400); // km (地月真实距离)
+  const [moonRadius, setMoonRadius] = useState(1737); // km (月球真实值)
+  const [spacePerPersonSide, setSpacePerPersonSide] = useState(129); // 每人占空间的立方体边长 (m)，类比三维地球 129m×129m
+
+  // 从粒子参数计算密度比
+  // 密度比 = 粒子质量比 / (间距比)^维度
+  // 三维：densityRatio3D = particleMassRatio / spacingRatio³
+  // 四维：densityRatio4D = particleMassRatio / spacingRatio⁴
+  const densityRatio3D = particleMassRatio / Math.pow(particleSpacingRatio, 3);
+  const densityRatio4D = particleMassRatio / Math.pow(particleSpacingRatio, 4);
+  
+  // 计算质量比
+  // 质量比 = 密度比 × (半径比)^维度
+  const radiusRatio = sunRadius / planetRadius;
+  const calculatedMassRatio3D = densityRatio3D * Math.pow(radiusRatio, 3);
+  const calculatedMassRatio4D = densityRatio4D * Math.pow(radiusRatio, 4);
+
+  // 当用户调整目标质量比时，反推间距比（基于四维公式）
+  // 质量比 = (粒子质量比 / 间距比⁴) × 半径比⁴
+  // 间距比⁴ = 粒子质量比 × 半径比⁴ / 质量比
+  // 间距比 = (粒子质量比 × 半径比⁴ / 质量比)^(1/4)
+  const handleMassRatioChange = (newMassRatio) => {
+    setTargetMassRatio(newMassRatio);
+    const newSpacingRatio = Math.pow(
+      particleMassRatio * Math.pow(radiusRatio, 4) / newMassRatio, 
+      0.25
+    );
+    if (newSpacingRatio > 0.01 && newSpacingRatio < 100) {
+      setParticleSpacingRatio(newSpacingRatio);
+    }
+  };
+
+  // 自动计算太阳表面引力
+  // 三维和四维都满足：g ∝ ρR
+  // 所以 g_sun / g_planet = (ρ_sun / ρ_planet) × (R_sun / R_planet)
+  // 使用四维密度比
+  const sunSurfaceGravity = surfaceGravity * densityRatio4D * radiusRatio;
+
+  const results = useMemo(() => {
+    // 单位转换
+    const R = planetRadius * 1000; // 行星半径 (m)
+    const g = surfaceGravity; // 地表引力 (m/s²)
+    const R_sun = sunRadius * 1000; // 太阳半径 (m)
+    const g_sun = sunSurfaceGravity; // 太阳表面引力 (m/s²)
+    const theta = (sunAngularSize * Math.PI) / 180; // 太阳视角 (rad)
+    const d_moon = moonOrbitalRadius * 1000; // 月球轨道半径 (m)
+    const R_moon = moonRadius * 1000; // 月球半径 (m)
+
+    // 计算太阳距离（从视角大小）
+    const a = R_sun / Math.tan(theta / 2); // 太阳距离 (m)
+
+    // 太阳的 GM（四维：g = GM/R³，所以 GM = g × R³）
+    const GM_sun = g_sun * Math.pow(R_sun, 3);
+    
+    // 行星的 GM
+    const GM_planet = g * Math.pow(R, 3);
+
+    // 四维轨道力学：T = 2π r² / √(GM)
+    // 公转周期（绕太阳）用太阳的 GM
+    const T_year = (2 * Math.PI * Math.pow(a, 2)) / Math.sqrt(GM_sun);
+    const T_year_days = T_year / 86400;
+
+    // 月球轨道周期（绕行星）用行星的 GM
+    const T_month = (2 * Math.PI * Math.pow(d_moon, 2)) / Math.sqrt(GM_planet);
+    const T_month_days = T_month / 86400;
+
+    // 月球视角大小
+    const moon_angular = (2 * Math.atan(R_moon / d_moon) * 180) / Math.PI;
+
+    // 月球处的引力（相对于地表）
+    const g_moon_ratio = Math.pow(R / d_moon, 3);
+
+    // 行星平衡温度计算
+    // 三维：T_p ∝ T_s × (R_s/r)^(1/2) = T_s × θ^(1/2)
+    // 四维：T_p ∝ T_s × (R_s/r)^(3/5) = T_s × θ^(3/5)
+    // 其中 θ = R_s / r ≈ tan(视角/2) ≈ 视角/2 (弧度)
+    const theta_rad = (sunAngularSize * Math.PI) / 180 / 2; // 半视角（弧度）
+    
+    // 地球的参数
+    const earth_theta = (0.53 * Math.PI) / 180 / 2;
+    const earth_temp = 255; // K (地球无大气平衡温度)
+    
+    // 三维行星温度（用于对比）
+    const planet_temp_3d = sunTemperature * Math.pow(theta_rad, 0.5);
+    
+    // 四维行星温度
+    // T_p = T_s × (R_s/r)^(3/5) 但需要考虑四维黑体辐射 T^5
+    // 能量平衡：吸收 = 辐射
+    // 吸收 ∝ (R_s/r)³ × T_s^5 × R_p³ (截面积是三维球)
+    // 辐射 ∝ T_p^5 × R_p³ (表面积是三维球面)
+    // 所以 T_p^5 ∝ (R_s/r)³ × T_s^5
+    // T_p = T_s × (R_s/r)^(3/5) = T_s × θ^(3/5)
+    const planet_temp_4d = sunTemperature * Math.pow(theta_rad, 3/5);
+
+    // 行星表面积（四维：S³ 表面积 = 2π²R³）
+    const surface_area = 2 * Math.PI * Math.PI * Math.pow(R, 3); // m³
+    const surface_area_km3 = surface_area / 1e9; // km³
+    const earth_surface = 5.1e14; // m²
+    const surface_ratio = surface_area / earth_surface;
+
+    // 人口估算
+    // 三维地球陆地：每人约占 16,667 m²（60人/km²），相当于 129m × 129m 的正方形
+    // 四维类比：每人占一个 spacePerPersonSide × spacePerPersonSide × spacePerPersonSide 的立方体
+    const spacePerPerson = Math.pow(spacePerPersonSide, 3); // m³
+    const estimated_population = surface_area / spacePerPerson;
+
+    // 逃逸速度 v_esc = √(gR)（四维）
+    const v_escape = Math.sqrt(g * R); // m/s
+
+    // 轨道不稳定时间尺度（大约是轨道周期的 1/9）
+    const instability_time = T_month / 9;
+
+    // === 三维对比计算 ===
+    // 三维：g = GM/R², T = 2π√(r³/GM)
+    const GM_sun_3d = g_sun * Math.pow(R_sun, 2); // 三维太阳GM
+    const GM_planet_3d = g * Math.pow(R, 2); // 三维行星GM
+    const T_year_3d = 2 * Math.PI * Math.sqrt(Math.pow(a, 3) / GM_sun_3d);
+    const T_year_3d_days = T_year_3d / 86400;
+    const T_month_3d = 2 * Math.PI * Math.sqrt(Math.pow(d_moon, 3) / GM_planet_3d);
+    const T_month_3d_days = T_month_3d / 86400;
+
+    return {
+      sunDistance: a / 1000, // km
+      yearLength: T_year_days,
+      monthLength: T_month_days,
+      monthsPerYear: T_year_days / T_month_days,
+      moonAngularSize: moon_angular,
+      moonGravityRatio: g_moon_ratio,
+      planetTemp4D: planet_temp_4d,
+      planetTemp3D: planet_temp_3d,
+      surfaceArea: surface_area_km3, // km³
+      surfaceRatio: surface_ratio,
+      estimatedPopulation: estimated_population,
+      escapeVelocity: v_escape / 1000, // km/s
+      instabilityDays: instability_time / 86400,
+      GM_planet: GM_planet,
+      GM_sun: GM_sun,
+      // 三维对比
+      yearLength3D: T_year_3d_days,
+      monthLength3D: T_month_3d_days,
+      moonGravityRatio3D: Math.pow(R / d_moon, 2), // 三维是 1/r²
+    };
+  }, [planetRadius, surfaceGravity, sunAngularSize, sunRadius, sunTemperature, moonOrbitalRadius, moonRadius, spacePerPersonSide, sunSurfaceGravity]);
+
+  const formatNumber = (n, digits = 2) => {
+    if (n >= 1e9) return (n / 1e9).toFixed(digits) + ' 十亿';
+    if (n >= 1e6) return (n / 1e6).toFixed(digits) + ' 百万';
+    if (n >= 1e3) return (n / 1e3).toFixed(digits) + ' 千';
+    if (n < 0.01) return n.toExponential(digits);
+    return n.toFixed(digits);
+  };
+
+  // 中文人口格式化（万、亿、万亿）
+  const formatPopulation = (n) => {
+    if (n >= 1e16) return (n / 1e16).toFixed(2) + ' 亿亿';
+    if (n >= 1e12) return (n / 1e12).toFixed(2) + ' 万亿';
+    if (n >= 1e8) return (n / 1e8).toFixed(2) + ' 亿';
+    if (n >= 1e4) return (n / 1e4).toFixed(2) + ' 万';
+    if (n >= 1000) return Math.round(n).toLocaleString();
+    return n.toFixed(0);
+  };
+
+  // 专门用于天数/月数的格式化（不用"千天"这种单位）
+  const formatDays = (n) => {
+    if (n >= 1e9) return (n / 1e9).toFixed(2) + ' 十亿天';
+    if (n >= 1e6) return (n / 1e6).toFixed(2) + ' 百万天';
+    if (n >= 1e4) return Math.round(n).toLocaleString() + ' 天';
+    if (n >= 100) return Math.round(n).toLocaleString() + ' 天';
+    if (n >= 1) return n.toFixed(1) + ' 天';
+    if (n >= 1/24) return (n * 24).toFixed(1) + ' 小时';
+    return (n * 24 * 60).toFixed(1) + ' 分钟';
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-900 text-white p-6">
+      <h1 className="text-2xl font-bold mb-2 text-center">四维世界参数计算器</h1>
+      <p className="text-gray-400 text-center mb-6 text-sm">
+        调整参数，自动计算自洽的四维行星系统
+      </p>
+
+      <div className="max-w-4xl mx-auto grid md:grid-cols-2 gap-6">
+        {/* 输入参数 */}
+        <div className="bg-gray-800 p-4 rounded-lg">
+          <h2 className="text-lg font-semibold mb-4 text-blue-400">🎛️ 输入参数</h2>
+          
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm text-gray-400 mb-1">
+                行星半径 (km)
+              </label>
+              <div className="flex gap-2 items-center">
+                <input
+                  type="range"
+                  min="500"
+                  max="30000"
+                  step="1"
+                  value={planetRadius}
+                  onChange={(e) => setPlanetRadius(Number(e.target.value))}
+                  className="flex-1"
+                />
+                <NumInput
+                  min="100"
+                  max="100000"
+                  value={planetRadius}
+                  onChange={setPlanetRadius}
+                  className="w-24 bg-gray-700 text-white px-2 py-1 rounded text-sm"
+                />
+              </div>
+              <div className="text-xs text-gray-500">地球: 6,371 km</div>
+            </div>
+
+            <div>
+              <label className="block text-sm text-gray-400 mb-1">
+                地表引力 (m/s²)
+              </label>
+              <div className="flex gap-2 items-center">
+                <input
+                  type="range"
+                  min="0.1"
+                  max="30"
+                  step="0.01"
+                  value={surfaceGravity}
+                  onChange={(e) => setSurfaceGravity(Number(e.target.value))}
+                  className="flex-1"
+                />
+                <NumInput
+                  min="0.01"
+                  max="1000"
+                  step="0.01"
+                  value={surfaceGravity}
+                  onChange={setSurfaceGravity}
+                  className="w-24 bg-gray-700 text-white px-2 py-1 rounded text-sm"
+                />
+              </div>
+              <div className="text-xs text-gray-500">地球: 9.81 m/s²</div>
+            </div>
+
+            <div>
+              <label className="block text-sm text-gray-400 mb-1">
+                太阳视直径 (°)
+              </label>
+              <div className="flex gap-2 items-center">
+                <input
+                  type="range"
+                  min="0.1"
+                  max="90"
+                  step="0.01"
+                  value={sunAngularSize}
+                  onChange={(e) => setSunAngularSize(Number(e.target.value))}
+                  className="flex-1"
+                />
+                <NumInput
+                  min="0.01"
+                  max="180"
+                  step="0.01"
+                  value={sunAngularSize}
+                  onChange={setSunAngularSize}
+                  className="w-24 bg-gray-700 text-white px-2 py-1 rounded text-sm"
+                />
+              </div>
+              <div className="text-xs text-gray-500">地球上: 0.53°</div>
+            </div>
+
+            <div>
+              <label className="block text-sm text-gray-400 mb-1">
+                太阳半径 (km)
+              </label>
+              <div className="flex gap-2 items-center">
+                <input
+                  type="range"
+                  min="1000"
+                  max="2000000"
+                  step="1000"
+                  value={sunRadius}
+                  onChange={(e) => setSunRadius(Number(e.target.value))}
+                  className="flex-1"
+                />
+                <NumInput
+                  min="100"
+                  max="10000000"
+                  value={sunRadius}
+                  onChange={setSunRadius}
+                  className="w-24 bg-gray-700 text-white px-2 py-1 rounded text-sm"
+                />
+              </div>
+              <div className="text-xs text-gray-500">太阳: 696,000 km</div>
+            </div>
+
+            <div>
+              <label className="block text-sm text-gray-400 mb-1">
+                粒子质量比（恒星/行星平均粒子质量）
+              </label>
+              <div className="flex gap-2 items-center">
+                <input
+                  type="range"
+                  min="0.01"
+                  max="2"
+                  step="0.01"
+                  value={particleMassRatio}
+                  onChange={(e) => setParticleMassRatio(Number(e.target.value))}
+                  className="flex-1"
+                />
+                <NumInput
+                  min="0.001"
+                  max="10"
+                  step="0.01"
+                  value={particleMassRatio}
+                  onChange={setParticleMassRatio}
+                  className="w-20 bg-gray-700 text-white px-2 py-1 rounded text-sm"
+                />
+              </div>
+              <div className="text-xs text-gray-500">
+                三维真实值: 0.08（太阳氢氦~2 / 地球重元素~25）
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm text-gray-400 mb-1">
+                粒子间距比（恒星/行星粒子间距）
+              </label>
+              <div className="flex gap-2 items-center">
+                <input
+                  type="range"
+                  min="0.1"
+                  max="5"
+                  step="0.01"
+                  value={particleSpacingRatio}
+                  onChange={(e) => setParticleSpacingRatio(Number(e.target.value))}
+                  className="flex-1"
+                />
+                <NumInput
+                  min="0.01"
+                  max="100"
+                  step="0.01"
+                  value={particleSpacingRatio}
+                  onChange={setParticleSpacingRatio}
+                  className="w-20 bg-gray-700 text-white px-2 py-1 rounded text-sm"
+                />
+              </div>
+              <div className="text-xs text-gray-500">
+                三维真实值: 0.68（太阳高压下间距反而更小）
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm text-gray-400 mb-1">
+                🎯 四维质量比（调整会自动修改间距比）
+              </label>
+              <div className="flex gap-2 items-center">
+                <input
+                  type="range"
+                  min="1000"
+                  max="100000000"
+                  step="1000"
+                  value={calculatedMassRatio4D}
+                  onChange={(e) => handleMassRatioChange(Number(e.target.value))}
+                  className="flex-1"
+                />
+                <NumInput
+                  min="1"
+                  max="1000000000000"
+                  value={Math.round(calculatedMassRatio4D)}
+                  onChange={handleMassRatioChange}
+                  className="w-28 bg-gray-700 text-white px-2 py-1 rounded text-sm"
+                />
+              </div>
+              <div className="text-xs text-gray-500">
+                三维真实值: 33.30 万 | 当前: {(calculatedMassRatio4D / 10000).toFixed(2)} 万
+              </div>
+            </div>
+
+            <div className="bg-gray-700/50 p-2 rounded text-xs">
+              <div className="text-gray-400 mb-1">📊 由粒子参数计算的派生值：</div>
+              <div className="grid grid-cols-2 gap-1">
+                <div>
+                  <span className="text-gray-500">三维密度比: </span>
+                  <span className="text-green-400 font-mono">{densityRatio3D.toFixed(3)}</span>
+                  <span className="text-gray-600 ml-1">(真实0.256)</span>
+                </div>
+                <div>
+                  <span className="text-gray-500">四维密度比: </span>
+                  <span className="text-cyan-400 font-mono">{densityRatio4D.toFixed(4)}</span>
+                </div>
+                <div>
+                  <span className="text-gray-500">三维质量比: </span>
+                  <span className="text-green-400 font-mono">{formatPopulation(calculatedMassRatio3D)}</span>
+                  <span className="text-gray-600 ml-1">(真实33.3万)</span>
+                </div>
+                <div>
+                  <span className="text-gray-500">四维质量比: </span>
+                  <span className="text-cyan-400 font-mono">{formatPopulation(calculatedMassRatio4D)}</span>
+                </div>
+              </div>
+              <div className="text-yellow-400 mt-1">
+                → 太阳表面引力: {sunSurfaceGravity.toFixed(1)} m/s² 
+                <span className="text-gray-500">(三维太阳: 274 m/s²)</span>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm text-gray-400 mb-1">
+                太阳表面温度 (K)
+              </label>
+              <div className="flex gap-2 items-center">
+                <input
+                  type="range"
+                  min="2000"
+                  max="20000"
+                  step="10"
+                  value={sunTemperature}
+                  onChange={(e) => setSunTemperature(Number(e.target.value))}
+                  className="flex-1"
+                />
+                <NumInput
+                  min="100"
+                  max="100000"
+                  step="1"
+                  value={sunTemperature}
+                  onChange={setSunTemperature}
+                  className="w-24 bg-gray-700 text-white px-2 py-1 rounded text-sm"
+                />
+              </div>
+              <div className="text-xs text-gray-500">太阳: 5,778 K</div>
+            </div>
+
+            <hr className="border-gray-700" />
+
+            <div>
+              <label className="block text-sm text-gray-400 mb-1">
+                月球轨道半径 (km)
+              </label>
+              <div className="flex gap-2 items-center">
+                <input
+                  type="range"
+                  min="5000"
+                  max="1000000"
+                  step="100"
+                  value={moonOrbitalRadius}
+                  // onChange={handleNumInput(setMoonOrbitalRadius)}
+                  onChange={(e) => setMoonOrbitalRadius(Number(e.target.value))}
+                  className="flex-1"
+                />
+                <NumInput
+                  min="1000"
+                  max="10000000"
+                  value={moonOrbitalRadius}
+                  onChange={setMoonOrbitalRadius}
+                  className="w-24 bg-gray-700 text-white px-2 py-1 rounded text-sm"
+                />
+              </div>
+              <div className="text-xs text-gray-500">地月距离: 384,400 km</div>
+            </div>
+
+            <div>
+              <label className="block text-sm text-gray-400 mb-1">
+                月球半径 (km)
+              </label>
+              <div className="flex gap-2 items-center">
+                <input
+                  type="range"
+                  min="100"
+                  max="10000"
+                  step="1"
+                  value={moonRadius}
+                  // onChange={handleNumInput(setMoonRadius)}
+                  onChange={(e) => setMoonRadius(Number(e.target.value))}
+                  className="flex-1"
+                />
+                <NumInput
+                  min="10"
+                  max="50000"
+                  value={moonRadius}
+                  onChange={setMoonRadius}
+                  className="w-24 bg-gray-700 text-white px-2 py-1 rounded text-sm"
+                />
+              </div>
+              <div className="text-xs text-gray-500">月球: 1,737 km</div>
+            </div>
+
+            <hr className="border-gray-700" />
+
+            <div>
+              <label className="block text-sm text-gray-400 mb-1">
+                每人占空间边长 (m)
+              </label>
+              <div className="flex gap-2 items-center">
+                <input
+                  type="range"
+                  min="10"
+                  max="1000"
+                  step="1"
+                  value={spacePerPersonSide}
+                  // onChange={handleNumInput(setSpacePerPersonSide)}
+                  onChange={(e) => setSpacePerPersonSide(Number(e.target.value))}
+                  className="flex-1"
+                />
+                <NumInput
+                  min="1"
+                  max="10000"
+                  step="1"
+                  value={spacePerPersonSide}
+                  onChange={setSpacePerPersonSide}
+                  className="w-24 bg-gray-700 text-white px-2 py-1 rounded text-sm"
+                />
+              </div>
+              <div className="text-xs text-gray-500">
+                三维地球陆地: 每人占 129m × 129m 正方形
+              </div>
+              <div className="text-xs text-cyan-400 mt-1">
+                四维类比: 每人占 {spacePerPersonSide}m × {spacePerPersonSide}m × {spacePerPersonSide}m 立方体
+                <span className="text-gray-500 ml-1">= {Math.pow(spacePerPersonSide, 3).toLocaleString()} m³</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* 计算结果 */}
+        <div className="bg-gray-800 p-4 rounded-lg">
+          <h2 className="text-lg font-semibold mb-4 text-green-400">📊 计算结果</h2>
+          
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-2">
+              <div className="bg-gray-700 p-2 rounded">
+                <div className="text-xs text-gray-400">太阳距离</div>
+                <div className="text-lg font-mono text-yellow-400">
+                  {formatNumber(results.sunDistance)} km
+                </div>
+                <div className="text-xs text-gray-500">地日距离: 149.6 百万 km</div>
+              </div>
+              <div className="bg-gray-700 p-2 rounded">
+                <div className="text-xs text-gray-400">一年长度</div>
+                <div className="text-lg font-mono text-yellow-400">
+                  {formatDays(results.yearLength)}
+                </div>
+                <div className="text-xs text-gray-500">地球: 365.25 天</div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div className="bg-gray-700 p-2 rounded">
+                <div className="text-xs text-gray-400">月球周期</div>
+                <div className="text-lg font-mono text-blue-400">
+                  {formatDays(results.monthLength)}
+                </div>
+                <div className="text-xs text-gray-500">地球: 27.3 天</div>
+              </div>
+              <div className="bg-gray-700 p-2 rounded">
+                <div className="text-xs text-gray-400">每年月数</div>
+                <div className="text-lg font-mono text-blue-400">
+                  {formatNumber(results.monthsPerYear)} 月
+                </div>
+                <div className="text-xs text-gray-500">地球: 12.4 月</div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div className="bg-gray-700 p-2 rounded">
+                <div className="text-xs text-gray-400">月球视直径</div>
+                <div className="text-lg font-mono text-purple-400">
+                  {formatNumber(results.moonAngularSize)}°
+                </div>
+                <div className="text-xs text-gray-500">地球上月亮: 0.52°</div>
+              </div>
+              <div className="bg-gray-700 p-2 rounded">
+                <div className="text-xs text-gray-400">月球处引力</div>
+                <div className="text-lg font-mono text-purple-400">
+                  {(results.moonGravityRatio * 100).toExponential(2)}% g
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-red-900/30 border border-red-700 p-2 rounded">
+              <div className="text-xs text-red-400">⚠️ 轨道不稳定时间尺度</div>
+              <div className="text-lg font-mono text-red-400">
+                ~{formatDays(results.instabilityDays)}
+              </div>
+              <div className="text-xs text-gray-400">
+                无外力干预，月球会在此时间内逃逸或坠落
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div className="bg-gray-700 p-2 rounded">
+                <div className="text-xs text-gray-400">行星平衡温度 (4D)</div>
+                <div className="text-lg font-mono text-orange-400">
+                  {Math.round(results.planetTemp4D)} K
+                </div>
+                <div className="text-xs text-gray-500">
+                  = {Math.round(results.planetTemp4D - 273)}°C
+                </div>
+              </div>
+              <div className="bg-gray-700 p-2 rounded">
+                <div className="text-xs text-gray-400">逃逸速度</div>
+                <div className="text-lg font-mono text-green-400">
+                  {formatNumber(results.escapeVelocity)} km/s
+                </div>
+                <div className="text-xs text-gray-500">地球: 11.2 km/s</div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div className="bg-gray-700 p-2 rounded">
+                <div className="text-xs text-gray-400">行星表面积</div>
+                <div className="text-lg font-mono text-cyan-400">
+                  {results.surfaceArea.toExponential(2)} km³
+                </div>
+                <div className="text-xs text-gray-500">
+                  四维"面积"单位是 km³
+                </div>
+              </div>
+              <div className="bg-gray-700 p-2 rounded">
+                <div className="text-xs text-gray-400">估计人口</div>
+                <div className="text-lg font-mono text-cyan-400">
+                  {formatPopulation(results.estimatedPopulation)} 人
+                </div>
+                <div className="text-xs text-gray-500">
+                  每人占 {spacePerPersonSide}m 边长立方体
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div className="bg-gray-700 p-2 rounded">
+                <div className="text-xs text-gray-400">太阳/行星质量比 (4D)</div>
+                <div className="text-lg font-mono text-pink-400">
+                  {formatPopulation(calculatedMassRatio4D)} 倍
+                </div>
+                <div className="text-xs text-gray-500">三维真实值: 33.3 万倍</div>
+              </div>
+              <div className="bg-gray-700 p-2 rounded">
+                <div className="text-xs text-gray-400">太阳/行星质量比 (3D)</div>
+                <div className="text-lg font-mono text-pink-300">
+                  {formatPopulation(calculatedMassRatio3D)} 倍
+                </div>
+                <div className="text-xs text-gray-500">同粒子参数下的三维值</div>
+              </div>
+            </div>
+
+            <div className="bg-gray-700 p-2 rounded">
+              <div className="text-xs text-gray-400">太阳 GM（四维）</div>
+              <div className="text-lg font-mono text-yellow-300">
+                {results.GM_sun.toExponential(2)} m⁴/s²
+              </div>
+              <div className="text-xs text-gray-500">
+                太阳表面引力: {sunSurfaceGravity.toFixed(1)} m/s²
+              </div>
+            </div>
+
+            {/* 三维对比 */}
+            <div className="bg-blue-900/30 border border-blue-700 p-3 rounded mt-2">
+              <div className="text-xs text-blue-400 mb-2">📊 三维世界对比（同样参数）</div>
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <div>
+                  <span className="text-gray-400">一年: </span>
+                  <span className="text-blue-300 font-mono">{formatDays(results.yearLength3D)}</span>
+                </div>
+                <div>
+                  <span className="text-gray-400">一月: </span>
+                  <span className="text-blue-300 font-mono">{formatDays(results.monthLength3D)}</span>
+                </div>
+                <div>
+                  <span className="text-gray-400">月球处引力: </span>
+                  <span className="text-blue-300 font-mono">{(results.moonGravityRatio3D * 100).toExponential(2)}% g</span>
+                </div>
+                <div>
+                  <span className="text-gray-400">行星温度: </span>
+                  <span className="text-blue-300 font-mono">{Math.round(results.planetTemp3D)} K</span>
+                </div>
+              </div>
+              <div className="text-xs text-gray-500 mt-2">
+                三维轨道稳定，无逃逸问题 | 地球平衡温度: 255 K (-18°C)
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 推荐配置 */}
+      <div className="max-w-4xl mx-auto mt-6 bg-gray-800 p-4 rounded-lg">
+        <h2 className="text-lg font-semibold mb-3 text-purple-400">💡 推荐配置方案</h2>
+        
+        <div className="grid md:grid-cols-4 gap-4 text-sm">
+          <button 
+            onClick={() => {
+              setPlanetRadius(6371);
+              setSurfaceGravity(9.81);
+              setSunAngularSize(0.53);
+              setSunRadius(696000);
+              setParticleMassRatio(0.08);
+              setParticleSpacingRatio(0.68);
+              setSunTemperature(5778);
+              setMoonOrbitalRadius(384400);
+              setMoonRadius(1737);
+              setSpacePerPersonSide(129);
+            }}
+            className="bg-gray-700 hover:bg-gray-600 p-3 rounded text-left"
+          >
+            <div className="font-semibold text-green-400">🌍 三维地球真实值</div>
+            <div className="text-gray-400 text-xs mt-1">
+              所有参数与三维地球相同<br/>
+              三维质量比=33.3万
+            </div>
+          </button>
+
+          <button 
+            onClick={() => {
+              setPlanetRadius(5000);
+              setSurfaceGravity(10);
+              setSunAngularSize(15);
+              setSunRadius(80000);
+              setParticleMassRatio(0.08);
+              setParticleSpacingRatio(0.68);
+              setSunTemperature(5000);
+              setMoonOrbitalRadius(40000);
+              setMoonRadius(1500);
+              setSpacePerPersonSide(129);
+            }}
+            className="bg-gray-700 hover:bg-gray-600 p-3 rounded text-left"
+          >
+            <div className="font-semibold text-yellow-400">方案A: 大太阳世界</div>
+            <div className="text-gray-400 text-xs mt-1">
+              太阳视角15°<br/>
+              粒子参数同三维
+            </div>
+          </button>
+
+          <button 
+            onClick={() => {
+              setPlanetRadius(8000);
+              setSurfaceGravity(8);
+              setSunAngularSize(5);
+              setSunRadius(200000);
+              setParticleMassRatio(0.08);
+              setParticleSpacingRatio(0.68);
+              setSunTemperature(6000);
+              setMoonOrbitalRadius(100000);
+              setMoonRadius(2000);
+              setSpacePerPersonSide(129);
+            }}
+            className="bg-gray-700 hover:bg-gray-600 p-3 rounded text-left"
+          >
+            <div className="font-semibold text-blue-400">方案B: 类地球比例</div>
+            <div className="text-gray-400 text-xs mt-1">
+              太阳视角5°<br/>
+              粒子参数同三维
+            </div>
+          </button>
+
+          <button 
+            onClick={() => {
+              setPlanetRadius(4000);
+              setSurfaceGravity(12);
+              setSunAngularSize(30);
+              setSunRadius(50000);
+              setParticleMassRatio(0.08);
+              setParticleSpacingRatio(0.68);
+              setSunTemperature(4500);
+              setMoonOrbitalRadius(25000);
+              setMoonRadius(2500);
+              setSpacePerPersonSide(129);
+            }}
+            className="bg-gray-700 hover:bg-gray-600 p-3 rounded text-left"
+          >
+            <div className="font-semibold text-red-400">方案C: 极端异世界</div>
+            <div className="text-gray-400 text-xs mt-1">
+              太阳视角30°<br/>
+              粒子参数同三维
+            </div>
+          </button>
+        </div>
+      </div>
+
+      {/* 物理说明 */}
+      <div className="max-w-4xl mx-auto mt-6 bg-gray-800 p-4 rounded-lg text-sm text-gray-300">
+        <h3 className="font-bold text-white mb-2">物理假设</h3>
+        <ul className="list-disc list-inside space-y-1">
+          <li><strong>引力</strong>：g = GM/r³（四维高斯定律）</li>
+          <li><strong>表面引力</strong>：g ∝ ρR（三维和四维通用）</li>
+          <li><strong>密度比</strong>：ρ比 = (粒子质量比) / (间距比)^维度</li>
+          <li><strong>质量比</strong>：M比 = (密度比) × (R比)^维度</li>
+          <li><strong>轨道周期</strong>：T = 2πr²/√(GM)（四维开普勒定律）</li>
+          <li><strong>黑体辐射</strong>：j ∝ T⁵（四维斯特藩-玻尔兹曼定律）</li>
+          <li><strong>行星温度</strong>：T_p = T_s × θ^(3/5)（θ为太阳半视角）</li>
+        </ul>
+        <div className="mt-3 p-2 bg-blue-900/30 border border-blue-700 rounded text-xs">
+          <strong className="text-blue-400">关于粒子参数：</strong>
+          <p className="mt-1"><strong>粒子质量比 0.08</strong>：太阳(氢氦,原子量~2) / 地球(重元素,原子量~25)</p>
+          <p><strong>粒子间距比 0.68</strong>：太阳虽是等离子体，但高压下间距反而比固体小</p>
+          <p className="mt-1 text-yellow-400">注意：四维密度比 = 粒子质量比/(间距比)⁴，比三维变化更剧烈！</p>
+        </div>
+        <p className="mt-2 text-yellow-400">
+          ⚠️ 四维生命适宜温度可能与地球不同（水的相变点取决于未知的四维化学）
+        </p>
+        <p className="mt-1 text-yellow-400">
+          ⚠️ 月球轨道在纯四维物理中极不稳定，需要外力维持
+        </p>
+      </div>
+    </div>
+  );
+};
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<FourDWorldCalculator />);
+    </script>
+</body>
+</html>
+

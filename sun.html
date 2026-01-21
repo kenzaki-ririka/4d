@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="zh">
+
+<head>
+    <meta charset="UTF-8">
+    <title>4D Sun: Ring Buffer Optimization</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #000;
+            font-family: 'Segoe UI', monospace, sans-serif;
+        }
+
+        canvas {
+            display: block;
+        }
+
+        /* HUD 样式保持不变 */
+        #hud {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            width: 240px;
+            background: rgba(10, 20, 30, 0.8);
+            border: 1px solid #446688;
+            border-left: 4px solid #00ffff;
+            border-radius: 4px;
+            padding: 15px;
+            color: #00ffcc;
+            font-family: 'Consolas', monospace;
+            z-index: 100;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(4px);
+            user-select: none;
+        }
+
+        .hud-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            align-items: center;
+        }
+
+        .hud-label {
+            color: #88aacc;
+            font-size: 12px;
+            text-transform: uppercase;
+        }
+
+        .hud-value {
+            font-size: 16px;
+            font-weight: bold;
+        }
+
+        #time-display {
+            font-size: 28px;
+            color: #fff;
+            text-align: center;
+            margin-bottom: 10px;
+            text-shadow: 0 0 8px rgba(0, 255, 255, 0.5);
+            letter-spacing: 2px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            padding-bottom: 10px;
+        }
+
+        #status-display {
+            text-align: center;
+            font-size: 13px;
+            padding: 4px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 4px;
+            margin-top: 5px;
+            font-weight: bold;
+            letter-spacing: 1px;
+        }
+
+        .state-day {
+            color: #ffcc00 !important;
+        }
+
+        .state-dusk {
+            color: #ff6600 !important;
+        }
+
+        .state-night {
+            color: #4466ff !important;
+        }
+    </style>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+
+<body>
+
+    <div id="hud">
+        <div id="time-display">12:00</div>
+        <div class="hud-row"><span class="hud-label">ELEVATION</span><span class="hud-value"
+                id="elevation-display">90.0°</span></div>
+        <div class="hud-row"><span class="hud-label">DISTANCE (W)</span><span class="hud-value"
+                id="w-display">-1.41</span></div>
+        <div id="status-display" class="state-day">HIGH NOON</div>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+        import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+        import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+        import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
+
+        // DOM Elements
+        const elTime = document.getElementById('time-display');
+        const elElev = document.getElementById('elevation-display');
+        const elW = document.getElementById('w-display');
+        const elStatus = document.getElementById('status-display');
+
+        // --- 1. 场景初始化 ---
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x000000, 0.02);
+
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(6, 4, 6);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.toneMapping = THREE.ReinhardToneMapping;
+        document.body.appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+
+        const renderScene = new RenderPass(scene, camera);
+        const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.5, 0.4, 0.85);
+        bloomPass.threshold = 0.15; bloomPass.strength = 2.0; bloomPass.radius = 0.3;
+        const composer = new EffectComposer(renderer);
+        composer.addPass(renderScene);
+        composer.addPass(bloomPass);
+
+        // --- 2. 核心参数 ---
+        // 最大容量 (内存池大小)
+        const RING_BUFFER_SIZE = 30000;
+
+        const params = {
+            timeSpeed: 1.0,
+            alphaSpeed: 1.0,
+            betaSpeed: 1.414,
+            radius: 2.0,
+            projectionR: 2.0,
+
+            // New Obliquity Parameters (in radians)
+            obliquity1: 0.0, // Tilts XY plane (Alpha) into Z
+            obliquity2: 0.0, // Tilts ZW plane (Beta) into X
+
+            showGrid: true, gridDensity: 12, showRings: true, solidHorizon: false,
+
+            trailMode: 'Dim',
+            maxTrailLength: 5000, // 用户设定的可见长度
+            hideSunNight: false,
+
+            pause: false,
+            clearTrail: function () { resetTrail(); }
+        };
+
+        const BASE_SCALE = 4.0;
+
+        // --- 3. 环形缓冲器数据结构 (核心优化) ---
+
+        // 存储位置 (x, y, z) - 线性内存，不移动
+        const ringPos = new Float32Array(RING_BUFFER_SIZE * 3);
+        // 存储 W 坐标 (用于计算颜色) - 线性内存
+        const ringW = new Float32Array(RING_BUFFER_SIZE);
+
+        // 指针
+        let ringHead = 0;       // 当前写入位置的索引
+        let ringCount = 0;      // 当前缓冲区内有效点的数量
+
+        // --- 4. 创建对象 ---
+        // A. 太阳
+        const sunGeometry = new THREE.SphereGeometry(0.15, 32, 32);
+        const sunMaterial = new THREE.MeshBasicMaterial({ color: 0xffaa00 });
+        const sun = new THREE.Mesh(sunGeometry, sunMaterial);
+        scene.add(sun);
+
+        // B. 轨迹线
+        const trailGeometry = new THREE.BufferGeometry();
+        // 显存 Buffer，每一帧我们都会把环形缓冲的数据“展开”复制到这里
+        const gpuPositions = new Float32Array(RING_BUFFER_SIZE * 3);
+        const gpuColors = new Float32Array(RING_BUFFER_SIZE * 3);
+
+        trailGeometry.setAttribute('position', new THREE.BufferAttribute(gpuPositions, 3));
+        trailGeometry.setAttribute('color', new THREE.BufferAttribute(gpuColors, 3));
+
+        // 标记为动态，告诉显卡这个数据会经常变
+        trailGeometry.attributes.position.setUsage(THREE.DynamicDrawUsage);
+        trailGeometry.attributes.color.setUsage(THREE.DynamicDrawUsage);
+
+        const trailMaterial = new THREE.LineBasicMaterial({
+            vertexColors: true,
+            transparent: true,
+            opacity: 0.8,
+            blending: THREE.AdditiveBlending
+        });
+        const trail = new THREE.Line(trailGeometry, trailMaterial);
+        trailGeometry.setDrawRange(0, 0); // 初始画0个点
+        scene.add(trail);
+
+        // C. 地平线系统 (保持不变)
+        const horizonGroup = new THREE.Group();
+        scene.add(horizonGroup);
+        const solidGeo = new THREE.SphereGeometry(1, 64, 64);
+        const matSolid = new THREE.MeshBasicMaterial({ color: 0x111111, transparent: true, opacity: 0.95, side: THREE.DoubleSide, depthWrite: false });
+        const solidSphere = new THREE.Mesh(solidGeo, matSolid);
+        solidSphere.visible = false;
+        horizonGroup.add(solidSphere);
+        let gridLines = new THREE.LineSegments();
+        horizonGroup.add(gridLines);
+
+        // 网格生成函数
+        function createCleanGrid(density) {
+            if (gridLines) horizonGroup.remove(gridLines);
+            const vertices = [];
+            const r = 1.0;
+            const meridianSegments = 64;
+            for (let i = 0; i < density; i++) {
+                const angleStep = (Math.PI * 2) / density;
+                const phi = i * angleStep;
+                for (let j = 0; j < meridianSegments; j++) {
+                    const alpha1 = (j / meridianSegments) * Math.PI * 2;
+                    const alpha2 = ((j + 1) / meridianSegments) * Math.PI * 2;
+                    const x1 = r * Math.sin(alpha1) * Math.cos(phi);
+                    const y1 = r * Math.cos(alpha1);
+                    const z1 = r * Math.sin(alpha1) * Math.sin(phi);
+                    const x2 = r * Math.sin(alpha2) * Math.cos(phi);
+                    const y2 = r * Math.cos(alpha2);
+                    const z2 = r * Math.sin(alpha2) * Math.sin(phi);
+                    vertices.push(x1, y1, z1, x2, y2, z2);
+                }
+            }
+            const parallelCount = density / 2;
+            for (let i = 1; i < parallelCount; i++) {
+                const lat = -Math.PI / 2 + (i / parallelCount) * Math.PI;
+                const circleRadius = r * Math.cos(lat);
+                const y = r * Math.sin(lat);
+                for (let j = 0; j < meridianSegments; j++) {
+                    const theta1 = (j / meridianSegments) * Math.PI * 2;
+                    const theta2 = ((j + 1) / meridianSegments) * Math.PI * 2;
+                    vertices.push(circleRadius * Math.cos(theta1), y, circleRadius * Math.sin(theta1), circleRadius * Math.cos(theta2), y, circleRadius * Math.sin(theta2));
+                }
+            }
+            const geometry = new THREE.BufferGeometry();
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+            const material = new THREE.LineBasicMaterial({ color: 0x666666, transparent: true, opacity: 0.3 });
+            gridLines = new THREE.LineSegments(geometry, material);
+            horizonGroup.add(gridLines);
+        }
+        createCleanGrid(params.gridDensity);
+
+        const ringsGroup = new THREE.Group();
+        horizonGroup.add(ringsGroup);
+        function createRing(color, axis) {
+            const geometry = new THREE.TorusGeometry(1.002, 0.003, 32, 100);
+            const material = new THREE.MeshBasicMaterial({ color: color });
+            const ring = new THREE.Mesh(geometry, material);
+            if (axis === 'x') ring.rotation.y = Math.PI / 2;
+            if (axis === 'y') ring.rotation.x = Math.PI / 2;
+            return ring;
+        }
+        ringsGroup.add(createRing(0xff3333, 'x'), createRing(0x33ff33, 'y'), createRing(0x3333ff, 'z'));
+
+        // --- 5. 逻辑函数 ---
+        let time = 0;
+        function get4DPosition(t) {
+            const r = params.radius / Math.sqrt(2);
+
+            // Component 1 (XY plane, driven by alpha)
+            const alpha = params.alphaSpeed * t;
+            let x1 = r * Math.cos(alpha);
+            let y1 = r * Math.sin(alpha);
+
+            // Apply Obliquity 1: Rotate local vector (x1, y1, 0) around X-axis (mix Y with Z in global)
+            const obl1 = params.obliquity1;
+            const y1_rot = y1 * Math.cos(obl1);
+            const z1FromY = y1 * Math.sin(obl1);
+
+            // Component 2 (ZW plane, driven by beta)
+            const beta = params.betaSpeed * t;
+            let z2 = r * Math.cos(beta);
+            let w2 = r * Math.sin(beta);
+
+            // Apply Obliquity 2: Rotate local vector (0, 0, z2) around Y-axis (mix Z with X in global)
+            // Let's rotate 'z2' into 'x'. 
+            // x' = x*cos + z*sin = z*sin (since x=0)
+            // z' = -x*sin + z*cos = z*cos
+            const obl2 = params.obliquity2;
+            const x2FromZ = z2 * Math.sin(obl2);
+            const z2_rot = z2 * Math.cos(obl2);
+
+            // Combine
+            return {
+                x: x1 + x2FromZ,
+                y: y1_rot,
+                z: z1FromY + z2_rot,
+                w: w2
+            };
+        }
+        function project4Dto3D(p4) {
+            const denom = params.projectionR - p4.w;
+            const safeDenom = Math.abs(denom) < 0.01 ? 0.01 : denom;
+            const scale = 1.0 / safeDenom * BASE_SCALE;
+            return new THREE.Vector3(p4.x * scale, p4.y * scale, p4.z * scale);
+        }
+        function updateHorizon() {
+            gridLines.visible = params.showGrid;
+            ringsGroup.visible = params.showRings;
+            solidSphere.visible = params.solidHorizon;
+            const horizonRadius4D = params.radius;
+            const scale = horizonRadius4D * (1.0 / params.projectionR) * BASE_SCALE;
+            horizonGroup.scale.set(scale, scale, scale);
+        }
+
+        // [优化] 重置只需归零指针
+        function resetTrail() {
+            ringHead = 0;
+            ringCount = 0;
+            trailGeometry.setDrawRange(0, 0);
+        }
+
+        function getTrailColor(wValue, mode) {
+            const isNight = wValue > 0;
+            if (!isNight) return { r: 0, g: 1, b: 1 };
+            if (mode === 'Normal') return { r: 0, g: 1, b: 1 };
+            if (mode === 'Dim') return { r: 0.1, g: 0.1, b: 0.4 };
+            if (mode === 'Hide') return { r: 0, g: 0, b: 0 };
+        }
+
+        function updateHUD(p4) {
+            // (HUD 逻辑保持不变)
+            const maxW = params.radius / Math.sqrt(2);
+            const normH = -p4.w / maxW;
+            let angleDeg = Math.asin(Math.max(-1, Math.min(1, normH))) * (180 / Math.PI);
+            const isRising = p4.z < 0;
+            let phase = Math.atan2(-p4.w, -p4.z);
+            let hourDecimal = 12 + (phase * (12 / Math.PI));
+            if (hourDecimal < 0) hourDecimal += 24;
+            if (hourDecimal >= 24) hourDecimal -= 24;
+            let hh = Math.floor(hourDecimal);
+            let mm = Math.floor((hourDecimal - hh) * 60);
+            let timeStr = `${hh.toString().padStart(2, '0')}:${mm.toString().padStart(2, '0')}`;
+            let status = "";
+            let statusClass = "";
+            if (angleDeg < -18) { status = "NIGHT"; statusClass = "state-night"; }
+            else if (angleDeg < -6) { status = isRising ? "ASTRONOMICAL DAWN" : "ASTRONOMICAL DUSK"; statusClass = "state-night"; }
+            else if (angleDeg < 0) { status = isRising ? "CIVIL DAWN" : "CIVIL DUSK"; statusClass = "state-dusk"; }
+            else if (angleDeg < 15) { status = isRising ? "SUNRISE" : "SUNSET"; statusClass = "state-dusk"; }
+            else if (angleDeg > 60) { status = "HIGH NOON"; statusClass = "state-day"; }
+            else { status = isRising ? "MORNING" : "AFTERNOON"; statusClass = "state-day"; }
+            elTime.textContent = timeStr; elElev.textContent = angleDeg.toFixed(1) + "°"; elW.textContent = p4.w.toFixed(2); elStatus.textContent = status; elStatus.className = statusClass;
+        }
+
+        // --- 6. GUI 设置 ---
+        const gui = new GUI();
+        const folderTime = gui.addFolder('Time Control');
+        folderTime.add(params, 'timeSpeed', 0.1, 5.0).name('Time Speed');
+        folderTime.add(params, 'pause').name('Pause');
+        const folderMotion = gui.addFolder('4D Motion');
+        folderMotion.add(params, 'alphaSpeed', 0, 5).name('Speed XY').onChange(resetTrail);
+        folderMotion.add(params, 'betaSpeed', 0, 5).name('Speed ZW').onChange(resetTrail);
+        folderMotion.add(params, 'radius', 1, 5).name('Radius').onChange(resetTrail);
+        folderMotion.add(params, 'obliquity1', 0, Math.PI / 2).name('Obliquity Alpha').onChange(resetTrail);
+        folderMotion.add(params, 'obliquity2', 0, Math.PI / 2).name('Obliquity Beta').onChange(resetTrail);
+        const folderView = gui.addFolder('Display Settings');
+        folderView.add(params, 'showGrid').name('Show Grid Lines');
+        folderView.add(params, 'gridDensity', 2, 32, 1).name('Grid Density').onChange((val) => { createCleanGrid(val); });
+        folderView.add(params, 'showRings').name('Show Equator/Rings');
+        folderView.add(params, 'solidHorizon').name('Solid Horizon (Inside View)');
+        folderView.add(params, 'hideSunNight').name('Hide Sun at Night');
+        const folderTrail = gui.addFolder('Trail Settings');
+        folderTrail.add(params, 'maxTrailLength', 100, RING_BUFFER_SIZE, 100).name('Trail Length');
+        folderTrail.add(params, 'trailMode', ['Normal', 'Dim', 'Hide']).name('Night Trail Color'); // 颜色在UpdateLoop中自动更新，不需要 onChange 刷新
+        folderTrail.add(params, 'clearTrail').name('Clear Trail');
+
+        // --- 7. 动画循环 ---
+        function animate() {
+            requestAnimationFrame(animate);
+            updateHorizon();
+
+            if (!params.pause) {
+                time += 0.00125 * params.timeSpeed;
+
+                const p4 = get4DPosition(time);
+                const p3 = project4Dto3D(p4);
+
+                updateHUD(p4);
+
+                // 更新太阳
+                sun.position.copy(p3);
+                const isNight = p4.w > 0;
+                if (params.hideSunNight && isNight) {
+                    sun.visible = false;
+                } else {
+                    sun.visible = true;
+                    const maxW = params.radius / Math.sqrt(2);
+                    const wNorm = (p4.w / maxW + 1) / 2;
+                    sun.material.color.setHSL(0.1 - wNorm * 0.15, 1.0, 0.6 - wNorm * 0.3);
+                }
+
+                // --- 环形缓冲器逻辑 (Ring Buffer Logic) ---
+
+                // 1. 写入新数据到环形缓冲区
+                ringPos[ringHead * 3] = p3.x;
+                ringPos[ringHead * 3 + 1] = p3.y;
+                ringPos[ringHead * 3 + 2] = p3.z;
+                ringW[ringHead] = p4.w; // 记录 w 用于计算颜色
+
+                // 2. 移动指针
+                ringHead = (ringHead + 1) % RING_BUFFER_SIZE;
+                if (ringCount < RING_BUFFER_SIZE) {
+                    ringCount++;
+                }
+
+                // 3. 构建线性 GPU Buffer (Unrolling)
+                // 我们只需要构建用户设定的 maxTrailLength 长度的数据
+                // 实际要画的点数
+                const drawCount = Math.min(ringCount, params.maxTrailLength);
+
+                // 环形缓冲区的“尾部”位置（最旧的点的索引）
+                // 逻辑是：当前头(ringHead) 是最新要写的，所以 ringHead-1 是最新的数据
+                // 最旧的数据在 (ringHead - drawCount + MAX) % MAX
+                let startIndex = (ringHead - drawCount + RING_BUFFER_SIZE) % RING_BUFFER_SIZE;
+
+                // 我们需要将 ringPos 中的数据 copy 到 gpuPositions
+                // 使用 subarray 和 set 进行极速内存拷贝
+                const posAttr = trail.geometry.attributes.position;
+                const colAttr = trail.geometry.attributes.color;
+
+                // 判断是否跨越了数组边界 (Wrapped around)
+                if (startIndex + drawCount <= RING_BUFFER_SIZE) {
+                    // 情况A: 数据是连续的，没有跨越数组末尾
+                    // 直接拷贝一段
+                    // GPU: [0 ... drawCount]
+                    // Ring: [startIndex ... startIndex + drawCount]
+                    posAttr.array.set(ringPos.subarray(startIndex * 3, (startIndex + drawCount) * 3), 0);
+
+                    // 同时计算颜色 (这里没法批量set，因为要经过 getTrailColor 计算)
+                    // 但我们可以优化：如果 trailMode 没变，颜色其实是跟着 w 走的
+                    // 为了简单起见，这里用循环，但只循环 drawCount 次
+                    for (let i = 0; i < drawCount; i++) {
+                        const w = ringW[startIndex + i];
+                        const c = getTrailColor(w, params.trailMode);
+                        colAttr.setXYZ(i, c.r, c.g, c.b);
+                    }
+
+                } else {
+                    // 情况B: 数据跨越了边界
+                    // 分两段拷贝
+                    const firstPartLen = RING_BUFFER_SIZE - startIndex;
+                    const secondPartLen = drawCount - firstPartLen;
+
+                    // 第一段: [startIndex ... end] -> GPU [0 ... firstPartLen]
+                    posAttr.array.set(ringPos.subarray(startIndex * 3, RING_BUFFER_SIZE * 3), 0);
+
+                    // 第二段: [0 ... secondPartLen] -> GPU [firstPartLen ...]
+                    posAttr.array.set(ringPos.subarray(0, secondPartLen * 3), firstPartLen * 3);
+
+                    // 颜色循环
+                    for (let i = 0; i < firstPartLen; i++) {
+                        const c = getTrailColor(ringW[startIndex + i], params.trailMode);
+                        colAttr.setXYZ(i, c.r, c.g, c.b);
+                    }
+                    for (let i = 0; i < secondPartLen; i++) {
+                        const c = getTrailColor(ringW[i], params.trailMode);
+                        colAttr.setXYZ(firstPartLen + i, c.r, c.g, c.b);
+                    }
+                }
+
+                // 4. 通知 GPU 更新
+                trail.geometry.setDrawRange(0, drawCount);
+                posAttr.needsUpdate = true;
+                colAttr.needsUpdate = true;
+            }
+
+            controls.update();
+            composer.render();
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            composer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate();
+    </script>
+</body>
+
+</html>

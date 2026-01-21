@@ -1,0 +1,826 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>多维轨道动态模拟器 - N体系统</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body, #root { width: 100%; height: 100%; overflow: hidden; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #000;
+        }
+        input[type="range"] {
+            -webkit-appearance: none;
+            background: #374151;
+            border-radius: 8px;
+            height: 6px;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 14px;
+            height: 14px;
+            background: #06b6d4;
+            border-radius: 50%;
+            cursor: pointer;
+        }
+        .param-input {
+            width: 60px;
+            background: #1f2937;
+            border: 1px solid #4b5563;
+            border-radius: 4px;
+            padding: 2px 4px;
+            color: #22d3ee;
+            font-family: monospace;
+            font-size: 12px;
+            text-align: right;
+        }
+        .param-input:focus {
+            outline: none;
+            border-color: #06b6d4;
+        }
+        .panel {
+            background: rgba(17, 24, 39, 0.95);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(75, 85, 99, 0.5);
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            transition: all 0.3s ease;
+        }
+        .panel-header {
+            cursor: pointer;
+            user-select: none;
+            padding: 10px 14px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid rgba(75, 85, 99, 0.3);
+        }
+        .panel-header:hover {
+            background: rgba(55, 65, 81, 0.5);
+        }
+        .panel-content {
+            padding: 12px 14px;
+            max-height: 70vh;
+            overflow-y: auto;
+        }
+        .panel-content::-webkit-scrollbar {
+            width: 4px;
+        }
+        .panel-content::-webkit-scrollbar-thumb {
+            background: #4b5563;
+            border-radius: 2px;
+        }
+        .collapsed .panel-content {
+            display: none;
+        }
+        .collapsed .panel-header {
+            border-bottom: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useCallback } = React;
+
+        const PLANET_COLORS = [
+          '#44ff88', '#ff6b6b', '#4ecdc4', '#ffe66d', 
+          '#ff8cc8', '#a855f7', '#fb923c', '#38bdf8',
+        ];
+
+        // 可折叠面板组件
+        const Panel = ({ title, icon, children, defaultOpen = true, className = '' }) => {
+          const [isOpen, setIsOpen] = useState(defaultOpen);
+          return (
+            <div className={`panel ${isOpen ? '' : 'collapsed'} ${className}`}>
+              <div className="panel-header" onClick={() => setIsOpen(!isOpen)}>
+                <span className="text-sm font-semibold flex items-center gap-2">
+                  {icon && <span>{icon}</span>}
+                  {title}
+                </span>
+                <span className="text-gray-400 text-xs">{isOpen ? '▼' : '▶'}</span>
+              </div>
+              <div className="panel-content">
+                {children}
+              </div>
+            </div>
+          );
+        };
+
+        const OrbitalSimulator4D = () => {
+          // 物理参数
+          const [lambda, setLambda] = useState(-0.01);
+          const [sunMass, setSunMass] = useState(1.0);
+          const [planetMass, setPlanetMass] = useState(0.1);
+          const [softening, setSoftening] = useState(0.2);
+          const [gravityPower, setGravityPower] = useState(3);
+          const [damping, setDamping] = useState(0); // 星际气体阻尼系数
+          const [sunSpin, setSunSpin] = useState(0); // 恒星自转角速度
+          const [spinDrag, setSpinDrag] = useState(0); // 自旋拖曳强度（惯性系拖曳）
+          
+          // 视图选项
+          const [viewMode, setViewMode] = useState('cm');
+          const [showSunTrail, setShowSunTrail] = useState(true);
+          const [viewScale, setViewScale] = useState(45);
+          
+          // 模拟控制
+          const [speed, setSpeed] = useState(10);
+          const [isRunning, setIsRunning] = useState(false);
+          const [simTime, setSimTime] = useState(0);
+          
+          // 画布尺寸
+          const [canvasSize, setCanvasSize] = useState({ width: window.innerWidth, height: window.innerHeight });
+          
+          // 多行星配置
+          const [planets, setPlanets] = useState([
+            { id: 1, initR: 4.0, initVRatio: 0.97, initAngle: 90, initPhase: 0, color: PLANET_COLORS[0] },
+            { id: 2, initR: 3.0, initVRatio: 1.02, initAngle: 90, initPhase: 120, color: PLANET_COLORS[1] },
+            { id: 3, initR: 2.2, initVRatio: 1.03, initAngle: 90, initPhase: 240, color: PLANET_COLORS[2] },
+          ]);
+          
+          // 运行时状态
+          const [sunState, setSunState] = useState({ pos: {x:0,y:0}, vel: {x:0,y:0}, trail: [] });
+          const [planetStates, setPlanetStates] = useState([]);
+          const [centerOfMass, setCenterOfMass] = useState({ x: 0, y: 0 });
+          const [selectedPlanet, setSelectedPlanet] = useState(1);
+          
+          const animationRef = useRef(null);
+          const physicsState = useRef({ sun: null, planets: [], time: 0 });
+          const nextPlanetId = useRef(4);
+
+          // 窗口大小监听
+          useEffect(() => {
+            const handleResize = () => {
+              setCanvasSize({ width: window.innerWidth, height: window.innerHeight });
+            };
+            window.addEventListener('resize', handleResize);
+            return () => window.removeEventListener('resize', handleResize);
+          }, []);
+
+          // 鼠标滚轮缩放
+          useEffect(() => {
+            const handleWheel = (e) => {
+              e.preventDefault();
+              const delta = e.deltaY > 0 ? 0.9 : 1.1;
+              setViewScale(prev => Math.max(5, Math.min(200, prev * delta)));
+            };
+            window.addEventListener('wheel', handleWheel, { passive: false });
+            return () => window.removeEventListener('wheel', handleWheel);
+          }, []);
+
+          // 计算圆轨道速度
+          const getCircularVelocity = useCallback((r, gm, lam, power = gravityPower) => {
+            let v2;
+            if (power >= 999) {
+              v2 = -lam * r * r;
+            } else if (power === -1) {
+              v2 = gm * r * r - lam * r * r;
+            } else if (power === 0) {
+              v2 = gm * r - lam * r * r;
+            } else {
+              v2 = gm / Math.pow(r, power - 1) - lam * r * r;
+            }
+            return v2 > 0 ? Math.sqrt(v2) : 0;
+          }, [gravityPower]);
+
+          const getMaxRadius = useCallback((gm, lam, power = gravityPower) => {
+            if (lam <= 0) return Infinity;
+            if (power >= 999) return 0;
+            if (power === -1) return Infinity;
+            if (power === 0) return gm / lam;
+            return Math.pow(gm / lam, 1 / (power + 1));
+          }, [gravityPower]);
+          
+          const getGravityName = (power) => {
+            if (power >= 999) return '无引力';
+            switch(power) {
+              case -1: return '谐振子 (∝r)';
+              case 0: return '恒定力';
+              case 1: return '2D (∝1/r)';
+              case 2: return '3D (∝1/r²)';
+              case 3: return '4D (∝1/r³)';
+              default: return `${power+1}D (∝1/r^${power})`;
+            }
+          };
+
+          const computeCenterOfMass = useCallback((sun, planets, sunM, planetM) => {
+            let totalMass = sunM;
+            let cmX = sun.pos.x * sunM;
+            let cmY = sun.pos.y * sunM;
+            planets.forEach(p => {
+              if (p.active) {
+                totalMass += planetM;
+                cmX += p.pos.x * planetM;
+                cmY += p.pos.y * planetM;
+              }
+            });
+            return { x: cmX / totalMass, y: cmY / totalMass };
+          }, []);
+
+          // 初始化系统
+          const resetSimulation = useCallback(() => {
+            const planetInitStates = planets.map(p => {
+              const r0 = p.initR;
+              const vCirc = getCircularVelocity(r0, sunMass, lambda);
+              const v0 = vCirc > 0 ? p.initVRatio * vCirc : 0.5;
+              const velAngleRad = (p.initAngle - 90) * Math.PI / 180;
+              const phaseRad = (p.initPhase || 0) * Math.PI / 180;
+              const posX = r0 * Math.cos(phaseRad);
+              const posY = r0 * Math.sin(phaseRad);
+              const baseVx = v0 * Math.sin(velAngleRad);
+              const baseVy = v0 * Math.cos(velAngleRad);
+              const velX = baseVx * Math.cos(phaseRad) - baseVy * Math.sin(phaseRad);
+              const velY = baseVx * Math.sin(phaseRad) + baseVy * Math.cos(phaseRad);
+              return {
+                id: p.id, pos: { x: posX, y: posY }, vel: { x: velX, y: velY },
+                trail: [{ x: posX, y: posY }], color: p.color, active: true
+              };
+            });
+            
+            let totalPx = 0, totalPy = 0;
+            planetInitStates.forEach(p => {
+              totalPx += planetMass * p.vel.x;
+              totalPy += planetMass * p.vel.y;
+            });
+            const sunVel = { x: -totalPx / sunMass, y: -totalPy / sunMass };
+            
+            let cmX = 0, cmY = 0, totalMass = sunMass;
+            planetInitStates.forEach(p => {
+              cmX += planetMass * p.pos.x;
+              cmY += planetMass * p.pos.y;
+              totalMass += planetMass;
+            });
+            cmX /= totalMass; cmY /= totalMass;
+            
+            const sunPos = { x: -cmX, y: -cmY };
+            planetInitStates.forEach(p => {
+              p.pos.x -= cmX; p.pos.y -= cmY;
+              p.trail = [{ x: p.pos.x, y: p.pos.y }];
+            });
+            
+            physicsState.current = {
+              sun: { pos: { ...sunPos }, vel: { ...sunVel }, active: true },
+              planets: planetInitStates.map(s => ({ id: s.id, pos: { ...s.pos }, vel: { ...s.vel }, active: true })),
+              time: 0
+            };
+            
+            setSunState({ pos: { ...sunPos }, vel: { ...sunVel }, trail: [{ ...sunPos }] });
+            setPlanetStates(planetInitStates);
+            setCenterOfMass({ x: 0, y: 0 });
+            setSimTime(0);
+          }, [planets, sunMass, planetMass, lambda, getCircularVelocity]);
+
+          useEffect(() => { resetSimulation(); }, []);
+
+          const handleParamChangeEnd = useCallback(() => {
+            if (!isRunning) resetSimulation();
+          }, [isRunning, resetSimulation]);
+
+          // 软化引力
+          const softenedGravity = useCallback((dx, dy, mass, eps, power) => {
+            if (power >= 999) return { ax: 0, ay: 0 };
+            const r2 = dx * dx + dy * dy;
+            const softR2 = r2 + eps * eps;
+            const r = Math.sqrt(softR2);
+            let factor;
+            if (power === -1) {
+              factor = mass / r;
+            } else if (power === 0) {
+              factor = mass / softR2 * r;
+            } else {
+              factor = mass / Math.pow(softR2, (power + 1) / 2);
+            }
+            return { ax: factor * dx, ay: factor * dy };
+          }, []);
+          
+          const physicsStep = useCallback((dt) => {
+            const state = physicsState.current;
+            const { sun, planets: pList } = state;
+            const activePlanets = pList.filter(p => p.active);
+            
+            let totalMass = sunMass, cmX = sun.pos.x * sunMass, cmY = sun.pos.y * sunMass;
+            activePlanets.forEach(p => {
+              totalMass += planetMass;
+              cmX += p.pos.x * planetMass;
+              cmY += p.pos.y * planetMass;
+            });
+            cmX /= totalMass; cmY /= totalMass;
+            
+            let sunAx = lambda * (sun.pos.x - cmX);
+            let sunAy = lambda * (sun.pos.y - cmY);
+            activePlanets.forEach(planet => {
+              const { ax, ay } = softenedGravity(planet.pos.x - sun.pos.x, planet.pos.y - sun.pos.y, planetMass, softening, gravityPower);
+              sunAx += ax; sunAy += ay;
+            });
+            
+            const planetAccels = activePlanets.map((planet, i) => {
+              let ax = lambda * (planet.pos.x - cmX);
+              let ay = lambda * (planet.pos.y - cmY);
+              const sunGrav = softenedGravity(sun.pos.x - planet.pos.x, sun.pos.y - planet.pos.y, sunMass, softening, gravityPower);
+              ax += sunGrav.ax; ay += sunGrav.ay;
+              for (let j = 0; j < activePlanets.length; j++) {
+                if (i === j) continue;
+                const other = activePlanets[j];
+                const planetGrav = softenedGravity(other.pos.x - planet.pos.x, other.pos.y - planet.pos.y, planetMass, softening, gravityPower);
+                ax += planetGrav.ax; ay += planetGrav.ay;
+              }
+              
+              // 引力磁效应（Lense-Thirring惯性系拖曳）
+              // 基于Killing矢量场与时空度规：旋转质量产生引力磁场 B_g
+              // 运动物体受类洛伦兹力：a = 2(v × ω_FD)，其中 ω_FD = 帧拖曳角速度场
+              // 衰减规律：ω_FD ∝ J/r^(n+1)，n = gravityPower（比引力多衰减1/r）
+              if (spinDrag > 0 && sunSpin !== 0) {
+                const dx = planet.pos.x - sun.pos.x;
+                const dy = planet.pos.y - sun.pos.y;
+                const r2 = dx * dx + dy * dy + softening * softening;
+                
+                // 帧拖曳角速度场：ω_FD ∝ J / r^(gravityPower+1)
+                // J（角动量）∝ Ω_sun × M_sun
+                const fdPower = gravityPower + 1; // 帧拖曳衰减指数
+                const rn = Math.pow(r2, fdPower / 2); // r^n via (r²)^(n/2)
+                const omegaFrame = spinDrag * sunSpin * sunMass / rn;
+                
+                // 引力磁力（类科里奥利力）：a = 2 × ω_FD × v
+                // 在xy平面，ω_FD沿z轴：a = 2 * ω_FD * (v_y, -v_x)
+                const relVx = planet.vel.x - sun.vel.x;
+                const relVy = planet.vel.y - sun.vel.y;
+                
+                ax += 2 * omegaFrame * relVy;
+                ay += -2 * omegaFrame * relVx;
+              }
+              
+              return { ax, ay };
+            });
+            
+            const newSunX = sun.pos.x + sun.vel.x * dt + 0.5 * sunAx * dt * dt;
+            const newSunY = sun.pos.y + sun.vel.y * dt + 0.5 * sunAy * dt * dt;
+            
+            const newPlanetPositions = activePlanets.map((planet, i) => ({
+              x: planet.pos.x + planet.vel.x * dt + 0.5 * planetAccels[i].ax * dt * dt,
+              y: planet.pos.y + planet.vel.y * dt + 0.5 * planetAccels[i].ay * dt * dt
+            }));
+            
+            let newTotalMass = sunMass, newCmX = newSunX * sunMass, newCmY = newSunY * sunMass;
+            activePlanets.forEach((_, i) => {
+              newTotalMass += planetMass;
+              newCmX += newPlanetPositions[i].x * planetMass;
+              newCmY += newPlanetPositions[i].y * planetMass;
+            });
+            newCmX /= newTotalMass; newCmY /= newTotalMass;
+            
+            let newSunAx = lambda * (newSunX - newCmX);
+            let newSunAy = lambda * (newSunY - newCmY);
+            activePlanets.forEach((_, i) => {
+              const grav = softenedGravity(newPlanetPositions[i].x - newSunX, newPlanetPositions[i].y - newSunY, planetMass, softening, gravityPower);
+              newSunAx += grav.ax; newSunAy += grav.ay;
+            });
+            
+            const newPlanetAccels = activePlanets.map((_, i) => {
+              let ax = lambda * (newPlanetPositions[i].x - newCmX);
+              let ay = lambda * (newPlanetPositions[i].y - newCmY);
+              const sunGrav = softenedGravity(newSunX - newPlanetPositions[i].x, newSunY - newPlanetPositions[i].y, sunMass, softening, gravityPower);
+              ax += sunGrav.ax; ay += sunGrav.ay;
+              for (let j = 0; j < activePlanets.length; j++) {
+                if (i === j) continue;
+                const planetGrav = softenedGravity(newPlanetPositions[j].x - newPlanetPositions[i].x, newPlanetPositions[j].y - newPlanetPositions[i].y, planetMass, softening, gravityPower);
+                ax += planetGrav.ax; ay += planetGrav.ay;
+              }
+              
+              // 引力磁效应（新位置，使用估算速度）
+              if (spinDrag > 0 && sunSpin !== 0) {
+                const dx = newPlanetPositions[i].x - newSunX;
+                const dy = newPlanetPositions[i].y - newSunY;
+                const r2 = dx * dx + dy * dy + softening * softening;
+                
+                const fdPower = gravityPower + 1;
+                const rn = Math.pow(r2, fdPower / 2);
+                const omegaFrame = spinDrag * sunSpin * sunMass / rn;
+                
+                const relVx = activePlanets[i].vel.x - sun.vel.x;
+                const relVy = activePlanets[i].vel.y - sun.vel.y;
+                
+                ax += 2 * omegaFrame * relVy;
+                ay += -2 * omegaFrame * relVx;
+              }
+              
+              return { ax, ay };
+            });
+            
+            sun.vel.x += 0.5 * (sunAx + newSunAx) * dt;
+            sun.vel.y += 0.5 * (sunAy + newSunAy) * dt;
+            sun.pos.x = newSunX; sun.pos.y = newSunY;
+            
+            // 星际气体阻尼（对太阳也有微弱作用）
+            if (damping > 0) {
+              const dampFactor = Math.exp(-damping * dt * 0.1); // 太阳受阻尼较小
+              sun.vel.x *= dampFactor;
+              sun.vel.y *= dampFactor;
+            }
+            
+            activePlanets.forEach((planet, i) => {
+              planet.vel.x += 0.5 * (planetAccels[i].ax + newPlanetAccels[i].ax) * dt;
+              planet.vel.y += 0.5 * (planetAccels[i].ay + newPlanetAccels[i].ay) * dt;
+              planet.pos.x = newPlanetPositions[i].x;
+              planet.pos.y = newPlanetPositions[i].y;
+              
+              // 星际气体阻尼（行星受阻尼更大）
+              if (damping > 0) {
+                const dampFactor = Math.exp(-damping * dt);
+                planet.vel.x *= dampFactor;
+                planet.vel.y *= dampFactor;
+              }
+            });
+            
+            state.time += dt;
+            return true;
+          }, [sunMass, planetMass, lambda, softening, gravityPower, damping, sunSpin, spinDrag, softenedGravity]);
+
+          // 动画循环
+          useEffect(() => {
+            if (!isRunning) {
+              if (animationRef.current) cancelAnimationFrame(animationRef.current);
+              return;
+            }
+            let lastFrameTime = null;
+            const animate = (currentTime) => {
+              const deltaTime = lastFrameTime !== null ? Math.min(currentTime - lastFrameTime, 50) : 16;
+              lastFrameTime = currentTime;
+              const dt = 0.0005;
+              const stepsPerFrame = Math.round(speed * 10 * deltaTime / 16);
+              for (let i = 0; i < Math.min(stepsPerFrame, 200); i++) physicsStep(dt);
+              
+              const state = physicsState.current;
+              setSimTime(state.time);
+              
+              setSunState(prev => {
+                const lastPoint = prev.trail[prev.trail.length - 1];
+                let newTrail = prev.trail;
+                if (!lastPoint || Math.abs(state.sun.pos.x - lastPoint.x) > 0.005 || Math.abs(state.sun.pos.y - lastPoint.y) > 0.005) {
+                  newTrail = [...prev.trail, { x: state.sun.pos.x, y: state.sun.pos.y }];
+                  if (newTrail.length > 20000) newTrail = newTrail.slice(-20000); // 不擦除轨迹
+                }
+                return { pos: { ...state.sun.pos }, vel: { ...state.sun.vel }, trail: newTrail };
+              });
+              
+              setPlanetStates(prev => prev.map(ps => {
+                  const current = state.planets.find(p => p.id === ps.id);
+                if (!current) return ps;
+                  const lastPoint = ps.trail[ps.trail.length - 1];
+                  let newTrail = ps.trail;
+                if (!lastPoint || Math.abs(current.pos.x - lastPoint.x) > 0.02 || Math.abs(current.pos.y - lastPoint.y) > 0.02) {
+                    newTrail = [...ps.trail, { x: current.pos.x, y: current.pos.y }];
+                    if (newTrail.length > 30000) newTrail = newTrail.slice(-30000); // 不擦除轨迹
+                  }
+                return { ...ps, pos: { ...current.pos }, vel: { ...current.vel }, trail: newTrail };
+              }));
+              
+              setCenterOfMass(computeCenterOfMass(state.sun, state.planets, sunMass, planetMass));
+                animationRef.current = requestAnimationFrame(animate);
+            };
+            animationRef.current = requestAnimationFrame(animate);
+            return () => { if (animationRef.current) cancelAnimationFrame(animationRef.current); };
+          }, [isRunning, speed, physicsStep, sunMass, planetMass, computeCenterOfMass]);
+
+          const addPlanet = () => {
+            if (planets.length >= 8) return;
+            const newId = nextPlanetId.current++;
+            setPlanets(prev => [...prev, {
+              id: newId, initR: 0.5 + planets.length * 0.5, initVRatio: 1.0, initAngle: 90,
+              initPhase: (planets.length * 60) % 360, color: PLANET_COLORS[planets.length % PLANET_COLORS.length]
+            }]);
+          };
+
+          const removePlanet = (id) => {
+            if (planets.length <= 1) return;
+            setPlanets(prev => prev.filter(p => p.id !== id));
+            if (selectedPlanet === id) setSelectedPlanet(planets[0].id);
+          };
+
+          const updatePlanet = (id, key, value) => {
+            setPlanets(prev => prev.map(p => p.id === id ? { ...p, [key]: value } : p));
+          };
+
+          const getViewCenter = () => {
+            if (viewMode === 'sun') return sunState.pos;
+            if (viewMode === 'cm') return centerOfMass;
+            return { x: 0, y: 0 };
+          };
+
+          const worldToScreen = (x, y) => {
+            const center = getViewCenter();
+            return {
+              x: canvasSize.width / 2 + (x - center.x) * viewScale,
+              y: canvasSize.height / 2 - (y - center.y) * viewScale
+            };
+          };
+
+          const selectedState = planetStates.find(p => p.id === selectedPlanet);
+          const rFromSun = selectedState && sunState ? Math.sqrt(
+            (selectedState.pos.x - sunState.pos.x) ** 2 + (selectedState.pos.y - sunState.pos.y) ** 2
+          ) : 0;
+
+          // 参数滑条组件
+          const ParamSlider = ({ label, value, setValue, min, max, step = 0.01, onChangeEnd }) => {
+            const [sliderValue, setSliderValue] = useState(value);
+            const [inputText, setInputText] = useState(String(value));
+            const [isSliding, setIsSliding] = useState(false);
+            const [isTyping, setIsTyping] = useState(false);
+            
+            useEffect(() => {
+              if (!isSliding) setSliderValue(value);
+              if (!isTyping) setInputText(String(value));
+            }, [value, isSliding, isTyping]);
+            
+            return (
+              <div className="mb-3">
+                <div className="flex justify-between items-center mb-1">
+                  <label className="text-xs text-gray-300">{label}</label>
+                  <input type="text" inputMode="decimal" value={inputText}
+                    onChange={(e) => setInputText(e.target.value)}
+                    onFocus={() => setIsTyping(true)}
+                    onBlur={() => {
+                      const val = parseFloat(inputText);
+                      if (!isNaN(val)) {
+                        const clamped = Math.max(min, Math.min(max, val));
+                        setSliderValue(clamped); setInputText(String(clamped)); setValue(clamped);
+                      } else setInputText(String(value));
+                      setIsTyping(false);
+                      if (onChangeEnd) onChangeEnd();
+                    }}
+                    onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
+                    className="param-input"
+                  />
+                </div>
+                <input type="range" min={min} max={max} step={step} value={sliderValue}
+                  onChange={(e) => { setSliderValue(parseFloat(e.target.value)); setInputText(e.target.value); }}
+                  onMouseDown={() => setIsSliding(true)}
+                  onTouchStart={() => setIsSliding(true)}
+                  onMouseUp={() => { setIsSliding(false); setValue(sliderValue); if (onChangeEnd) onChangeEnd(); }}
+                  onTouchEnd={() => { setIsSliding(false); setValue(sliderValue); if (onChangeEnd) onChangeEnd(); }}
+                  className="w-full"
+                />
+              </div>
+            );
+          };
+
+          return (
+            <div className="relative w-full h-full bg-black text-white">
+              {/* 全屏画布 */}
+              <svg width={canvasSize.width} height={canvasSize.height} className="absolute inset-0">
+                        {/* 背景网格 */}
+                {Array.from({ length: 20 }, (_, i) => i + 1).map(r => (
+                  <circle key={r} cx={canvasSize.width/2} cy={canvasSize.height/2}
+                    r={r * viewScale} fill="none" stroke="#1a1a2e" strokeWidth="1" />
+                ))}
+                <line x1={canvasSize.width/2} y1="0" x2={canvasSize.width/2} y2={canvasSize.height} stroke="#1a1a2e" />
+                <line x1="0" y1={canvasSize.height/2} x2={canvasSize.width} y2={canvasSize.height/2} stroke="#1a1a2e" />
+                        
+                        {/* 质心标记 */}
+                        {viewMode !== 'cm' && (() => {
+                  const cm = worldToScreen(centerOfMass.x, centerOfMass.y);
+                          return (
+                            <g>
+                      <line x1={cm.x - 12} y1={cm.y} x2={cm.x + 12} y2={cm.y} stroke="#a855f7" strokeWidth="2" />
+                      <line x1={cm.x} y1={cm.y - 12} x2={cm.x} y2={cm.y + 12} stroke="#a855f7" strokeWidth="2" />
+                            </g>
+                          );
+                        })()}
+                        
+                        {/* 太阳轨迹 */}
+                        {showSunTrail && sunState.trail.length > 1 && (
+                  <path d={sunState.trail.map((p, i) => {
+                    const s = worldToScreen(p.x, p.y);
+                    return `${i === 0 ? 'M' : 'L'} ${s.x} ${s.y}`;
+                  }).join(' ')} fill="none" stroke="#ffdd44" strokeWidth="1.5" opacity="0.4" />
+                        )}
+                        
+                        {/* 行星轨迹 */}
+                {planetStates.map(planet => planet.trail.length > 1 && (
+                  <path key={`trail-${planet.id}`}
+                              d={planet.trail.map((p, i) => {
+                      const s = worldToScreen(p.x, p.y);
+                      return `${i === 0 ? 'M' : 'L'} ${s.x} ${s.y}`;
+                              }).join(' ')}
+                    fill="none" stroke={planet.color}
+                    // strokeWidth={planet.id === selectedPlanet ? "2.5" : "1.5"}
+                    //           opacity={planet.id === selectedPlanet ? "0.9" : "0.5"}
+                              strokeWidth={1.5}
+                              opacity={0.5}
+                            />
+                        ))}
+                        
+                        {/* 太阳 */}
+                        {(() => {
+                  const s = worldToScreen(sunState.pos.x, sunState.pos.y);
+                          return (
+                            <g>
+                      <circle cx={s.x} cy={s.y} r="18" fill="#ffdd44" />
+                      <circle cx={s.x} cy={s.y} r="26" fill="none" stroke="#ffdd44" strokeWidth="2" opacity="0.3" />
+                            </g>
+                          );
+                        })()}
+                        
+                        {/* 行星 */}
+                        {planetStates.map(planet => {
+                  const s = worldToScreen(planet.pos.x, planet.pos.y);
+                          const isSelected = planet.id === selectedPlanet;
+                          return (
+                            <g key={`planet-${planet.id}`} onClick={() => setSelectedPlanet(planet.id)} style={{ cursor: 'pointer' }}>
+                      <circle cx={s.x} cy={s.y} r={isSelected ? 12 : 8} fill={planet.color}
+                        stroke={isSelected ? "#fff" : "none"} strokeWidth="2" />
+                              {isSelected && (
+                                <>
+                          <line x1={s.x} y1={s.y} x2={s.x + planet.vel.x * 40} y2={s.y - planet.vel.y * 40}
+                            stroke="#ff8844" strokeWidth="3" />
+                          <circle cx={s.x + planet.vel.x * 40} cy={s.y - planet.vel.y * 40} r="4" fill="#ff8844" />
+                                </>
+                              )}
+                            </g>
+                          );
+                        })}
+                      </svg>
+
+              {/* 左上：宇宙参数 */}
+              <div className="absolute top-4 left-4 w-64">
+                <Panel title="宇宙参数" icon="🌌" defaultOpen={true}>
+                  <ParamSlider label="Λ (宇宙学常数)" value={lambda} setValue={setLambda}
+                    min={-0.1} max={0.1} step={0.001} onChangeEnd={handleParamChangeEnd} />
+                  <ParamSlider label="太阳质量 M☉" value={sunMass} setValue={setSunMass}
+                    min={0.1} max={5} step={0.01} onChangeEnd={handleParamChangeEnd} />
+                  <ParamSlider label="行星质量 (×M☉)" value={planetMass} setValue={setPlanetMass}
+                    min={0} max={1} step={0.001} onChangeEnd={handleParamChangeEnd} />
+<ParamSlider label="软化长度 ε" value={softening} setValue={setSoftening}
+                    min={0.01} max={2} step={0.01} onChangeEnd={handleParamChangeEnd} />
+                  <ParamSlider label="气体阻尼 γ" value={damping} setValue={setDamping}
+                    min={0} max={0.5} step={0.001} onChangeEnd={handleParamChangeEnd} />
+                  {damping > 0 && (
+                    <div className="text-xs text-gray-500 -mt-2 mb-2">
+                      阻尼时间尺度: ~{(1/damping).toFixed(1)}
+                    </div>
+                  )}
+                  
+                  <ParamSlider label="恒星自旋 Ω" value={sunSpin} setValue={setSunSpin}
+                    min={-2} max={2} step={0.01} onChangeEnd={handleParamChangeEnd} />
+                  <ParamSlider label="自旋拖曳 κ" value={spinDrag} setValue={setSpinDrag}
+                    min={0} max={0.1} step={0.001} onChangeEnd={handleParamChangeEnd} />
+                  {spinDrag > 0 && sunSpin !== 0 && (
+                    <div className="text-xs text-gray-500 -mt-2 mb-2">
+                      惯性系拖曳: {sunSpin > 0 ? '逆时针' : '顺时针'} 加速行星
+                    </div>
+                  )}
+
+                  <div className="mb-2">
+                    <label className="text-xs text-gray-300 block mb-1">引力定律</label>
+                    <div className="flex gap-1">
+                      {[-1, 0, 1, 2, 3, 999].map(power => (
+                        <button key={power}
+                          onClick={() => { setGravityPower(power); handleParamChangeEnd(); }}
+                          className={`flex-1 py-1 rounded text-xs transition ${
+                            gravityPower === power ? 'bg-cyan-600' : 'bg-gray-700 hover:bg-gray-600'
+                          }`}>
+                          {power === -1 ? '∝r' : power === 0 ? '定' : power === 1 ? '1/r' : power === 2 ? '1/r²' : power === 3 ? '1/r³' : '无'}
+                      </button>
+                      ))}
+                    </div>
+                  </div>
+                  
+                  <div className="text-xs p-2 bg-gray-800 rounded">
+                    <div>引力: <span className="text-cyan-400">{getGravityName(gravityPower)}</span></div>
+                    <div>Λ: <span className={lambda < 0 ? "text-pink-400" : lambda > 0 ? "text-yellow-400" : "text-gray-400"}>
+                      {lambda < 0 ? 'AdS' : lambda > 0 ? 'dS' : '平坦'}
+                    </span></div>
+                    </div>
+                </Panel>
+                </div>
+                
+              {/* 左下：模拟控制 */}
+              <div className="absolute bottom-4 left-4 w-64">
+                <Panel title="模拟控制" icon="⚙️" defaultOpen={true}>
+                  <ParamSlider label="模拟速度" value={speed} setValue={setSpeed} min={0} max={20} step={0.1} />
+                  <ParamSlider label="视图缩放" value={viewScale} setValue={setViewScale} min={5} max={200} step={1} />
+                  
+                  <div className="text-xs text-gray-400 mb-2">
+                    时间: <span className="text-white font-mono">{simTime.toFixed(2)}</span>
+                </div>
+                
+                  <div className="flex gap-2 mb-2">
+                    <button onClick={() => setIsRunning(!isRunning)}
+                      className={`flex-1 py-2 rounded text-sm font-semibold ${isRunning ? 'bg-yellow-600' : 'bg-green-600'}`}>
+                      {isRunning ? '⏸ 暂停' : '▶ 运行'}
+                      </button>
+                    <button onClick={() => { setIsRunning(false); setTimeout(resetSimulation, 50); }}
+                      className="flex-1 py-2 rounded text-sm font-semibold bg-blue-600">🔄 重置</button>
+                    </div>
+                    
+                  <div className="flex gap-1 mb-2">
+                    {[{ mode: 'cm', label: '质心' }, { mode: 'sun', label: '太阳' }, { mode: 'inertial', label: '惯性' }].map(({ mode, label }) => (
+                      <button key={mode} onClick={() => setViewMode(mode)}
+                        className={`flex-1 py-1 rounded text-xs ${viewMode === mode ? 'bg-purple-600' : 'bg-gray-700'}`}>{label}</button>
+                    ))}
+                  </div>
+                  
+                  <label className="flex items-center gap-2 text-xs cursor-pointer">
+                    <input type="checkbox" checked={showSunTrail} onChange={(e) => setShowSunTrail(e.target.checked)} />
+                    显示太阳轨迹
+                  </label>
+                </Panel>
+              </div>
+
+              {/* 右上：行星列表 */}
+              <div className="absolute top-4 right-4 w-56">
+                <Panel title="行星列表" icon="🪐" defaultOpen={true}>
+                          <div className="flex justify-between items-center mb-2">
+                    <span className="text-xs text-gray-400">{planets.length}/8 行星</span>
+                    <button onClick={addPlanet} disabled={planets.length >= 8}
+                      className={`px-2 py-1 rounded text-xs ${planets.length >= 8 ? 'bg-gray-600' : 'bg-green-600'}`}>+ 添加</button>
+                  </div>
+                  
+                  <div className="space-y-1 max-h-60 overflow-y-auto">
+                    {planets.map(planet => (
+                      <div key={planet.id}
+                        className={`p-2 rounded cursor-pointer ${selectedPlanet === planet.id ? 'bg-gray-700 ring-1 ring-cyan-500' : 'hover:bg-gray-800'}`}
+                        onClick={() => setSelectedPlanet(planet.id)}>
+                        <div className="flex justify-between items-center">
+                            <div className="flex items-center gap-2">
+                            <span className="w-3 h-3 rounded-full" style={{ background: planet.color }}></span>
+                            <span className="text-xs">#{planet.id}</span>
+                            </div>
+                            {planets.length > 1 && (
+                            <button onClick={(e) => { e.stopPropagation(); removePlanet(planet.id); }}
+                              className="text-red-400 text-xs px-1">✕</button>
+                            )}
+                          </div>
+                          
+                          {selectedPlanet === planet.id && (
+                          <div className="mt-2 space-y-2">
+                            <ParamSlider label="距离 r₀" value={planet.initR}
+                                setValue={(v) => updatePlanet(planet.id, 'initR', v)}
+                              min={0.2} max={5} step={0.05} onChangeEnd={handleParamChangeEnd} />
+                            <ParamSlider label="速度比" value={planet.initVRatio}
+                                setValue={(v) => updatePlanet(planet.id, 'initVRatio', v)}
+                              min={0.1} max={2} step={0.05} onChangeEnd={handleParamChangeEnd} />
+                            <ParamSlider label="速度方向°" value={planet.initAngle}
+                                setValue={(v) => updatePlanet(planet.id, 'initAngle', v)}
+                              min={0} max={180} step={1} onChangeEnd={handleParamChangeEnd} />
+                            <div className="text-xs text-gray-500 -mt-1 mb-1">
+                              {planet.initAngle === 90 ? '圆轨道' : planet.initAngle < 90 ? '向内螺旋' : '向外螺旋'}
+                            </div>
+                            <ParamSlider label="相位°" value={planet.initPhase || 0}
+                                setValue={(v) => updatePlanet(planet.id, 'initPhase', v)}
+                              min={0} max={360} step={5} onChangeEnd={handleParamChangeEnd} />
+                            <div className="text-xs text-gray-500">到太阳: {rFromSun.toFixed(3)}</div>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                </Panel>
+                  </div>
+                  
+              {/* 右下：预设 */}
+              <div className="absolute bottom-4 right-4 w-56">
+                <Panel title="预设场景" icon="⭐" defaultOpen={false}>
+                  <div className="space-y-1">
+                    {[
+                      { name: '默认配置', fn: () => { setLambda(-0.01); setSunMass(1.0); setPlanetMass(0.1); setGravityPower(3); } },
+                      { name: 'AdS太阳系', fn: () => { setLambda(-0.001); setPlanetMass(0.001); } },
+                      { name: '双星对称', fn: () => { setLambda(-0.005); setPlanetMass(0.02); setPlanets([
+                        { id: 1, initR: 1.2, initVRatio: 1.0, initAngle: 90, initPhase: 0, color: PLANET_COLORS[0] },
+                        { id: 2, initR: 1.2, initVRatio: 1.0, initAngle: 90, initPhase: 180, color: PLANET_COLORS[1] },
+                      ]); } },
+                      { name: '三体问题', fn: () => { setLambda(-0.003); setPlanetMass(0.015); setPlanets([
+                        { id: 1, initR: 1.5, initVRatio: 1.0, initAngle: 90, initPhase: 0, color: PLANET_COLORS[0] },
+                        { id: 2, initR: 1.5, initVRatio: 1.0, initAngle: 90, initPhase: 120, color: PLANET_COLORS[1] },
+                        { id: 3, initR: 1.5, initVRatio: 1.0, initAngle: 90, initPhase: 240, color: PLANET_COLORS[2] },
+                      ]); } },
+                      { name: '玫瑰轨道', fn: () => { setLambda(-0.01); setPlanetMass(0.001); setPlanets([
+                        { id: 1, initR: 2.0, initVRatio: 1.3, initAngle: 90, initPhase: 0, color: PLANET_COLORS[0] },
+                      ]); } },
+                    ].map(({ name, fn }) => (
+                      <button key={name} onClick={() => { fn(); setIsRunning(false); setTimeout(resetSimulation, 50); }}
+                        className="w-full py-1.5 px-2 bg-gray-700 hover:bg-gray-600 rounded text-xs text-left">{name}</button>
+                    ))}
+                  </div>
+                </Panel>
+              </div>
+              
+              {/* 中下：状态信息 */}
+              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-xs text-gray-500 text-center">
+                <div>滚轮缩放 · 点击行星选中 · {viewMode === 'cm' ? '质心' : viewMode === 'sun' ? '太阳' : '惯性系'}参考系</div>
+              </div>
+            </div>
+          );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<OrbitalSimulator4D />);
+    </script>
+</body>
+</html>

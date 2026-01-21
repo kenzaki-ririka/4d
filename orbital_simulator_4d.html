@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>四维天体模拟器</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body, #root { width: 100%; height: 100%; overflow: hidden; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0a0a0f;
+        }
+        input[type="range"] {
+            -webkit-appearance: none;
+            background: #374151;
+            border-radius: 8px;
+            height: 6px;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 14px;
+            height: 14px;
+            background: #06b6d4;
+            border-radius: 50%;
+            cursor: pointer;
+        }
+        .param-input {
+            width: 55px;
+            background: #1f2937;
+            border: 1px solid #4b5563;
+            border-radius: 4px;
+            padding: 2px 4px;
+            color: #22d3ee;
+            font-family: monospace;
+            font-size: 11px;
+            text-align: right;
+        }
+        .param-input:focus {
+            outline: none;
+            border-color: #06b6d4;
+        }
+        .panel {
+            background: rgba(17, 24, 39, 0.95);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(75, 85, 99, 0.5);
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            transition: all 0.3s ease;
+        }
+        .panel-header {
+            cursor: pointer;
+            user-select: none;
+            padding: 8px 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid rgba(75, 85, 99, 0.3);
+        }
+        .panel-header:hover {
+            background: rgba(55, 65, 81, 0.5);
+        }
+        .panel-content {
+            padding: 10px 12px;
+            max-height: 60vh;
+            overflow-y: auto;
+        }
+        .panel-content::-webkit-scrollbar { width: 4px; }
+        .panel-content::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 2px; }
+        .collapsed .panel-content { display: none; }
+        .collapsed .panel-header { border-bottom: none; }
+        .view-box {
+            border: 1px solid #333;
+            border-radius: 8px;
+            background: #000;
+            position: relative;
+        }
+        .axis-label {
+            position: absolute;
+            font-size: 12px;
+            color: #666;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useCallback } = React;
+
+        const BODY_COLORS = [
+          '#ffdd44', '#44ff88', '#ff6b6b', '#4ecdc4', '#ffe66d', 
+          '#ff8cc8', '#a855f7', '#fb923c', '#38bdf8', '#f472b6',
+        ];
+
+        // 4D向量运算
+        const vec4 = {
+          add: (a, b) => ({ x: a.x + b.x, y: a.y + b.y, z: a.z + b.z, w: a.w + b.w }),
+          sub: (a, b) => ({ x: a.x - b.x, y: a.y - b.y, z: a.z - b.z, w: a.w - b.w }),
+          scale: (v, s) => ({ x: v.x * s, y: v.y * s, z: v.z * s, w: v.w * s }),
+          dot: (a, b) => a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w,
+          length: (v) => Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z + v.w * v.w),
+          lengthSq: (v) => v.x * v.x + v.y * v.y + v.z * v.z + v.w * v.w,
+          normalize: (v) => {
+            const len = vec4.length(v);
+            return len > 0 ? vec4.scale(v, 1 / len) : { x: 0, y: 0, z: 0, w: 0 };
+          },
+          zero: () => ({ x: 0, y: 0, z: 0, w: 0 }),
+          copy: (v) => ({ x: v.x, y: v.y, z: v.z, w: v.w }),
+        };
+
+        // 可折叠面板
+        const Panel = ({ title, icon, children, defaultOpen = true, className = '' }) => {
+          const [isOpen, setIsOpen] = useState(defaultOpen);
+          return (
+            <div className={`panel ${isOpen ? '' : 'collapsed'} ${className}`}>
+              <div className="panel-header" onClick={() => setIsOpen(!isOpen)}>
+                <span className="text-sm font-semibold flex items-center gap-2">
+                  {icon && <span>{icon}</span>}{title}
+                </span>
+                <span className="text-gray-400 text-xs">{isOpen ? '▼' : '▶'}</span>
+              </div>
+              <div className="panel-content">{children}</div>
+            </div>
+          );
+        };
+
+        const OrbitalSimulator4D = () => {
+          // 物理参数
+          const [lambda, setLambda] = useState(-0.01);
+          const [softening, setSoftening] = useState(0.3);
+          const [gravityPower, setGravityPower] = useState(3); // 4D空间默认1/r³
+          
+          // 视图选项
+          const [viewScale, setViewScale] = useState(80);
+          const [showTrails, setShowTrails] = useState(true);
+          const [viewAxes, setViewAxes] = useState({ view1: ['x', 'y'], view2: ['z', 'w'] });
+          
+          // 模拟控制
+          const [speed, setSpeed] = useState(10);
+          const [isRunning, setIsRunning] = useState(false);
+          const [simTime, setSimTime] = useState(0);
+          
+          // 天体配置 - 每个天体有4D位置、4D速度、质量
+          const [bodies, setBodies] = useState([
+            { id: 1, mass: 1.0, pos: vec4.zero(), vel: vec4.zero(), color: BODY_COLORS[0], name: '恒星α' },
+            { id: 2, mass: 0.1, pos: { x: 2, y: 0, z: 0, w: 0 }, vel: { x: 0, y: 0.7, z: 0, w: 0 }, color: BODY_COLORS[1], name: '行星1' },
+            { id: 3, mass: 0.1, pos: { x: 0, y: 0, z: 2, w: 0 }, vel: { x: 0, y: 0, z: 0, w: 0.7 }, color: BODY_COLORS[2], name: '行星2' },
+          ]);
+          
+          // 运行时状态
+          const [bodyStates, setBodyStates] = useState([]);
+          const [selectedBody, setSelectedBody] = useState(1);
+          const [centerOfMass, setCenterOfMass] = useState(vec4.zero());
+          
+          const animationRef = useRef(null);
+          const physicsState = useRef({ bodies: [], time: 0 });
+          const nextBodyId = useRef(4);
+
+          // 计算质心
+          const computeCenterOfMass = useCallback((bodyList) => {
+            let totalMass = 0;
+            let cm = vec4.zero();
+            bodyList.forEach(b => {
+              totalMass += b.mass;
+              cm = vec4.add(cm, vec4.scale(b.pos, b.mass));
+            });
+            return totalMass > 0 ? vec4.scale(cm, 1 / totalMass) : vec4.zero();
+          }, []);
+
+          // 初始化系统
+          const resetSimulation = useCallback(() => {
+            // 计算初始质心和总动量
+            let totalMass = 0;
+            let totalMomentum = vec4.zero();
+            let cm = vec4.zero();
+            
+            bodies.forEach(b => {
+              totalMass += b.mass;
+              cm = vec4.add(cm, vec4.scale(b.pos, b.mass));
+              totalMomentum = vec4.add(totalMomentum, vec4.scale(b.vel, b.mass));
+            });
+            cm = vec4.scale(cm, 1 / totalMass);
+            
+            // 调整使质心在原点，总动量为零
+            const cmVel = vec4.scale(totalMomentum, 1 / totalMass);
+            
+            const initStates = bodies.map(b => ({
+              id: b.id,
+              mass: b.mass,
+              pos: vec4.sub(b.pos, cm),
+              vel: vec4.sub(b.vel, cmVel),
+              trail: [vec4.sub(b.pos, cm)],
+              color: b.color,
+              name: b.name,
+            }));
+            
+            physicsState.current = {
+              bodies: initStates.map(s => ({
+                id: s.id, mass: s.mass,
+                pos: vec4.copy(s.pos), vel: vec4.copy(s.vel)
+              })),
+              time: 0
+            };
+            
+            setBodyStates(initStates);
+            setCenterOfMass(vec4.zero());
+            setSimTime(0);
+          }, [bodies]);
+
+          useEffect(() => { resetSimulation(); }, []);
+
+          const handleParamChangeEnd = useCallback(() => {
+            if (!isRunning) resetSimulation();
+          }, [isRunning, resetSimulation]);
+
+          // 4D软化引力
+          // 在n维空间，引力 F ∝ 1/r^(n-1)，4D空间是1/r³
+          const computeGravity = useCallback((dr, mass, eps, power) => {
+            if (power >= 999) return vec4.zero();
+            
+            const r2 = vec4.lengthSq(dr);
+            const eps2 = eps * eps;
+            const softR2 = r2 + eps2;
+            const r = Math.sqrt(softR2);
+            
+            let factor;
+            if (power === -1) {
+              // 谐振子：F ∝ r
+              factor = mass / r;
+            } else if (power === 0) {
+              // 恒定力
+              factor = mass / softR2 * r;
+            } else {
+              // 标准引力 F ∝ 1/r^power
+              factor = mass / Math.pow(softR2, (power + 1) / 2);
+            }
+            
+            return vec4.scale(dr, factor);
+          }, []);
+
+          // 物理步进
+          const physicsStep = useCallback((dt) => {
+            const state = physicsState.current;
+            const bodyList = state.bodies;
+            const n = bodyList.length;
+            
+            // 计算质心（用于Λ力）
+            const cm = computeCenterOfMass(bodyList);
+            
+            // 计算所有天体的加速度
+            const accels = bodyList.map((body, i) => {
+              // Λ力（相对于质心）
+              let acc = vec4.scale(vec4.sub(body.pos, cm), lambda);
+              
+              // 其他天体的引力
+              for (let j = 0; j < n; j++) {
+                if (i === j) continue;
+                const other = bodyList[j];
+                const dr = vec4.sub(other.pos, body.pos);
+                const grav = computeGravity(dr, other.mass, softening, gravityPower);
+                acc = vec4.add(acc, grav);
+              }
+              
+              return acc;
+            });
+            
+            // Velocity Verlet - 更新位置
+            const newPositions = bodyList.map((body, i) => {
+              const acc = accels[i];
+              return vec4.add(
+                vec4.add(body.pos, vec4.scale(body.vel, dt)),
+                vec4.scale(acc, 0.5 * dt * dt)
+              );
+            });
+            
+            // 计算新位置的质心
+            let tempBodies = bodyList.map((b, i) => ({ ...b, pos: newPositions[i] }));
+            const newCm = computeCenterOfMass(tempBodies);
+            
+            // 计算新位置的加速度
+            const newAccels = bodyList.map((body, i) => {
+              const newPos = newPositions[i];
+              let acc = vec4.scale(vec4.sub(newPos, newCm), lambda);
+              
+              for (let j = 0; j < n; j++) {
+                if (i === j) continue;
+                const dr = vec4.sub(newPositions[j], newPos);
+                const grav = computeGravity(dr, bodyList[j].mass, softening, gravityPower);
+                acc = vec4.add(acc, grav);
+              }
+              
+              return acc;
+            });
+            
+            // 更新速度和位置
+            bodyList.forEach((body, i) => {
+              body.vel = vec4.add(body.vel, vec4.scale(vec4.add(accels[i], newAccels[i]), 0.5 * dt));
+              body.pos = newPositions[i];
+            });
+            
+            state.time += dt;
+            return true;
+          }, [lambda, softening, gravityPower, computeGravity, computeCenterOfMass]);
+
+          // 动画循环
+          useEffect(() => {
+            if (!isRunning) {
+              if (animationRef.current) cancelAnimationFrame(animationRef.current);
+              return;
+            }
+            
+            let lastFrameTime = null;
+            const animate = (currentTime) => {
+              const deltaTime = lastFrameTime !== null ? Math.min(currentTime - lastFrameTime, 50) : 16;
+              lastFrameTime = currentTime;
+              
+              const dt = 0.001;
+              const stepsPerFrame = Math.round(speed * 5 * deltaTime / 16);
+              for (let i = 0; i < Math.min(stepsPerFrame, 100); i++) physicsStep(dt);
+              
+              const state = physicsState.current;
+              setSimTime(state.time);
+              
+              setBodyStates(prev => prev.map(ps => {
+                const current = state.bodies.find(b => b.id === ps.id);
+                if (!current) return ps;
+                
+                const lastPoint = ps.trail[ps.trail.length - 1];
+                let newTrail = ps.trail;
+                const dist = lastPoint ? vec4.length(vec4.sub(current.pos, lastPoint)) : 1;
+                if (dist > 0.03) {
+                  newTrail = [...ps.trail, vec4.copy(current.pos)];
+                  if (newTrail.length > 2000) newTrail = newTrail.slice(-2000);
+                }
+                
+                return { ...ps, pos: vec4.copy(current.pos), vel: vec4.copy(current.vel), trail: newTrail };
+              }));
+              
+              setCenterOfMass(computeCenterOfMass(state.bodies));
+              animationRef.current = requestAnimationFrame(animate);
+            };
+            
+            animationRef.current = requestAnimationFrame(animate);
+            return () => { if (animationRef.current) cancelAnimationFrame(animationRef.current); };
+          }, [isRunning, speed, physicsStep, computeCenterOfMass]);
+
+          // 添加/删除天体
+          const addBody = () => {
+            if (bodies.length >= 10) return;
+            const newId = nextBodyId.current++;
+            const angle = bodies.length * 1.2;
+            setBodies(prev => [...prev, {
+              id: newId,
+              mass: 0.1,
+              pos: { x: Math.cos(angle) * 2, y: Math.sin(angle) * 2, z: 0, w: 0 },
+              vel: { x: -Math.sin(angle) * 0.5, y: Math.cos(angle) * 0.5, z: 0, w: 0 },
+              color: BODY_COLORS[bodies.length % BODY_COLORS.length],
+              name: `天体${newId}`
+            }]);
+          };
+
+          const removeBody = (id) => {
+            if (bodies.length <= 1) return;
+            setBodies(prev => prev.filter(b => b.id !== id));
+            if (selectedBody === id) setSelectedBody(bodies[0].id);
+          };
+
+          const updateBody = (id, updates) => {
+            setBodies(prev => prev.map(b => b.id === id ? { ...b, ...updates } : b));
+          };
+
+          // 4D到2D投影
+          const project4Dto2D = (pos, axes) => {
+            const axisMap = { x: pos.x, y: pos.y, z: pos.z, w: pos.w };
+            return { x: axisMap[axes[0]], y: axisMap[axes[1]] };
+          };
+
+          // 渲染视图
+          const renderView = (axes, size, title) => {
+            const center = { x: size / 2, y: size / 2 };
+            
+            const worldToScreen = (pos) => {
+              const p2d = project4Dto2D(pos, axes);
+              return {
+                x: center.x + p2d.x * viewScale,
+                y: center.y - p2d.y * viewScale
+              };
+            };
+            
+            return (
+              <div className="view-box relative" style={{ width: size, height: size }}>
+                <svg width={size} height={size}>
+                  {/* 网格 */}
+                  {Array.from({ length: 10 }, (_, i) => i + 1).map(r => (
+                    <circle key={r} cx={center.x} cy={center.y} r={r * viewScale}
+                      fill="none" stroke="#1a1a2e" strokeWidth="1" />
+                  ))}
+                  <line x1={center.x} y1="0" x2={center.x} y2={size} stroke="#1a1a2e" />
+                  <line x1="0" y1={center.y} x2={size} y2={center.y} stroke="#1a1a2e" />
+                  
+                  {/* 质心 */}
+                  {(() => {
+                    const cm = worldToScreen(centerOfMass);
+                    return (
+                      <g>
+                        <line x1={cm.x - 8} y1={cm.y} x2={cm.x + 8} y2={cm.y} stroke="#a855f7" strokeWidth="2" />
+                        <line x1={cm.x} y1={cm.y - 8} x2={cm.x} y2={cm.y + 8} stroke="#a855f7" strokeWidth="2" />
+                      </g>
+                    );
+                  })()}
+                  
+                  {/* 轨迹 */}
+                  {showTrails && bodyStates.map(body => body.trail.length > 1 && (
+                    <path key={`trail-${body.id}`}
+                      d={body.trail.map((p, i) => {
+                        const s = worldToScreen(p);
+                        return `${i === 0 ? 'M' : 'L'} ${s.x} ${s.y}`;
+                      }).join(' ')}
+                      fill="none" stroke={body.color}
+                      strokeWidth={body.id === selectedBody ? "2" : "1"}
+                      opacity={body.id === selectedBody ? "0.8" : "0.4"}
+                    />
+                  ))}
+                  
+                  {/* 天体 */}
+                  {bodyStates.map(body => {
+                    const s = worldToScreen(body.pos);
+                    const isSelected = body.id === selectedBody;
+                    const radius = Math.max(4, Math.min(20, Math.sqrt(body.mass) * 12));
+                    return (
+                      <g key={`body-${body.id}`} onClick={() => setSelectedBody(body.id)} style={{ cursor: 'pointer' }}>
+                        <circle cx={s.x} cy={s.y} r={radius + 3} fill="none"
+                          stroke={body.color} strokeWidth="2" opacity="0.3" />
+                        <circle cx={s.x} cy={s.y} r={radius} fill={body.color}
+                          stroke={isSelected ? "#fff" : "none"} strokeWidth="2" />
+                        {isSelected && (
+                          <text x={s.x} y={s.y - radius - 5} fill="#fff" fontSize="10" textAnchor="middle">
+                            {body.name}
+                          </text>
+                        )}
+                      </g>
+                    );
+                  })}
+                </svg>
+                
+                {/* 轴标签 */}
+                <div className="axis-label" style={{ bottom: 5, right: 10 }}>{axes[0].toUpperCase()}</div>
+                <div className="axis-label" style={{ top: 5, left: 10 }}>{axes[1].toUpperCase()}</div>
+                <div className="absolute top-1 right-2 text-xs text-gray-500">{title}</div>
+              </div>
+            );
+          };
+
+          const selectedBodyData = bodies.find(b => b.id === selectedBody);
+          const selectedState = bodyStates.find(b => b.id === selectedBody);
+
+          // 参数滑条
+          const ParamSlider = ({ label, value, setValue, min, max, step = 0.01, onChangeEnd }) => {
+            const [sliderValue, setSliderValue] = useState(value);
+            const [inputText, setInputText] = useState(String(value));
+            const [isSliding, setIsSliding] = useState(false);
+            const [isTyping, setIsTyping] = useState(false);
+            
+            useEffect(() => {
+              if (!isSliding) setSliderValue(value);
+              if (!isTyping) setInputText(String(value));
+            }, [value, isSliding, isTyping]);
+            
+            return (
+              <div className="mb-2">
+                <div className="flex justify-between items-center mb-1">
+                  <label className="text-xs text-gray-300">{label}</label>
+                  <input type="text" inputMode="decimal" value={inputText}
+                    onChange={(e) => setInputText(e.target.value)}
+                    onFocus={() => setIsTyping(true)}
+                    onBlur={() => {
+                      const val = parseFloat(inputText);
+                      if (!isNaN(val)) {
+                        const clamped = Math.max(min, Math.min(max, val));
+                        setSliderValue(clamped); setInputText(String(clamped)); setValue(clamped);
+                      } else setInputText(String(value));
+                      setIsTyping(false);
+                      if (onChangeEnd) onChangeEnd();
+                    }}
+                    onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
+                    className="param-input"
+                  />
+                </div>
+                <input type="range" min={min} max={max} step={step} value={sliderValue}
+                  onChange={(e) => { setSliderValue(parseFloat(e.target.value)); setInputText(e.target.value); }}
+                  onMouseDown={() => setIsSliding(true)}
+                  onTouchStart={() => setIsSliding(true)}
+                  onMouseUp={() => { setIsSliding(false); setValue(sliderValue); if (onChangeEnd) onChangeEnd(); }}
+                  onTouchEnd={() => { setIsSliding(false); setValue(sliderValue); if (onChangeEnd) onChangeEnd(); }}
+                  className="w-full"
+                />
+              </div>
+            );
+          };
+
+          // 4D坐标输入
+          const Vec4Input = ({ label, value, onChange }) => (
+            <div className="mb-2">
+              <label className="text-xs text-gray-400 block mb-1">{label}</label>
+              <div className="grid grid-cols-4 gap-1">
+                {['x', 'y', 'z', 'w'].map(axis => (
+                  <input key={axis} type="number" step="0.1"
+                    value={value[axis]} placeholder={axis}
+                    onChange={(e) => onChange({ ...value, [axis]: parseFloat(e.target.value) || 0 })}
+                    className="param-input w-full text-center"
+                    style={{ width: '100%' }}
+                  />
+                ))}
+              </div>
+              <div className="grid grid-cols-4 gap-1 mt-0.5">
+                {['x', 'y', 'z', 'w'].map(axis => (
+                  <span key={axis} className="text-center text-xs text-gray-500">{axis}</span>
+                ))}
+              </div>
+            </div>
+          );
+
+          return (
+            <div className="relative w-full h-full bg-[#0a0a0f] text-white overflow-hidden">
+              {/* 双视图 */}
+              <div className="absolute inset-0 flex items-center justify-center gap-4 p-4">
+                <div className="flex flex-col items-center gap-2">
+                  {renderView(viewAxes.view1, Math.min(700, window.innerHeight - 80), `${viewAxes.view1[0].toUpperCase()}-${viewAxes.view1[1].toUpperCase()} 平面`)}
+                  <div className="flex gap-1">
+                    {['x', 'y', 'z', 'w'].map(a1 => ['x', 'y', 'z', 'w'].filter(a2 => a2 !== a1).map(a2 => (
+                      <button key={`${a1}${a2}`}
+                        onClick={() => setViewAxes(prev => ({ ...prev, view1: [a1, a2] }))}
+                        className={`px-2 py-0.5 rounded text-xs ${
+                          viewAxes.view1[0] === a1 && viewAxes.view1[1] === a2 ? 'bg-cyan-600' : 'bg-gray-700 hover:bg-gray-600'
+                        }`}>
+                        {a1}{a2}
+                      </button>
+                    )))}
+                  </div>
+                </div>
+                
+                <div className="flex flex-col items-center gap-2">
+                  {renderView(viewAxes.view2, Math.min(700, window.innerHeight - 80), `${viewAxes.view2[0].toUpperCase()}-${viewAxes.view2[1].toUpperCase()} 平面`)}
+                  <div className="flex gap-1">
+                    {['x', 'y', 'z', 'w'].map(a1 => ['x', 'y', 'z', 'w'].filter(a2 => a2 !== a1).map(a2 => (
+                      <button key={`${a1}${a2}`}
+                        onClick={() => setViewAxes(prev => ({ ...prev, view2: [a1, a2] }))}
+                        className={`px-2 py-0.5 rounded text-xs ${
+                          viewAxes.view2[0] === a1 && viewAxes.view2[1] === a2 ? 'bg-purple-600' : 'bg-gray-700 hover:bg-gray-600'
+                        }`}>
+                        {a1}{a2}
+                      </button>
+                    )))}
+                  </div>
+                </div>
+              </div>
+
+              {/* 左上：物理参数 */}
+              <div className="absolute top-4 left-4 w-56">
+                <Panel title="物理参数" icon="🌌" defaultOpen={true}>
+                  <ParamSlider label="Λ (宇宙学常数)" value={lambda} setValue={setLambda}
+                    min={-0.1} max={0.1} step={0.001} onChangeEnd={handleParamChangeEnd} />
+                  <ParamSlider label="软化长度 ε" value={softening} setValue={setSoftening}
+                    min={0.01} max={2} step={0.01} onChangeEnd={handleParamChangeEnd} />
+                  
+                  <div className="mb-2">
+                    <label className="text-xs text-gray-300 block mb-1">引力定律</label>
+                    <div className="flex gap-1">
+                      {[-1, 0, 1, 2, 3, 999].map(power => (
+                        <button key={power}
+                          onClick={() => { setGravityPower(power); handleParamChangeEnd(); }}
+                          className={`flex-1 py-1 rounded text-xs ${
+                            gravityPower === power ? 'bg-cyan-600' : 'bg-gray-700 hover:bg-gray-600'
+                          }`}>
+                          {power === -1 ? '∝r' : power === 0 ? '定' : power >= 999 ? '无' : `1/r${power > 1 ? '⁰¹²³'[power] : ''}`}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      4D空间真实引力是 1/r³
+                    </div>
+                  </div>
+                </Panel>
+              </div>
+
+              {/* 左下：模拟控制 */}
+              <div className="absolute bottom-4 left-4 w-56">
+                <Panel title="模拟控制" icon="⚙️" defaultOpen={true}>
+                  <ParamSlider label="模拟速度" value={speed} setValue={setSpeed} min={0} max={20} step={0.1} />
+                  <ParamSlider label="视图缩放" value={viewScale} setValue={setViewScale} min={10} max={300} step={1} />
+                  
+                  <div className="text-xs text-gray-400 mb-2">
+                    时间: <span className="text-white font-mono">{simTime.toFixed(2)}</span>
+                  </div>
+                  
+                  <div className="flex gap-2 mb-2">
+                    <button onClick={() => setIsRunning(!isRunning)}
+                      className={`flex-1 py-2 rounded text-sm font-semibold ${isRunning ? 'bg-yellow-600' : 'bg-green-600'}`}>
+                      {isRunning ? '⏸ 暂停' : '▶ 运行'}
+                    </button>
+                    <button onClick={() => { setIsRunning(false); setTimeout(resetSimulation, 50); }}
+                      className="flex-1 py-2 rounded text-sm font-semibold bg-blue-600">🔄 重置</button>
+                  </div>
+                  
+                  <label className="flex items-center gap-2 text-xs cursor-pointer">
+                    <input type="checkbox" checked={showTrails} onChange={(e) => setShowTrails(e.target.checked)} />
+                    显示轨迹
+                  </label>
+                  
+                  <div className="mt-3 pt-3 border-t border-gray-700">
+                    <div className="text-xs text-gray-400 mb-2">预设场景</div>
+                    <div className="space-y-1">
+                      <button onClick={() => {
+                        // 三体混沌 - 等质量三角形 + 4D扰动
+                        setLambda(-0.01);
+                        setSoftening(0.2);
+                        setGravityPower(2); // 1/r² 引力更稳定
+                        setBodies([
+                          { id: 1, mass: 0.5, pos: { x: 1.5, y: 0, z: 0.1, w: 0 }, vel: { x: 0, y: 0.35, z: 0, w: 0.02 }, color: BODY_COLORS[0], name: '甲' },
+                          { id: 2, mass: 0.5, pos: { x: -0.75, y: 1.3, z: -0.05, w: 0.05 }, vel: { x: -0.303, y: -0.175, z: 0.02, w: -0.01 }, color: BODY_COLORS[1], name: '乙' },
+                          { id: 3, mass: 0.5, pos: { x: -0.75, y: -1.3, z: -0.05, w: -0.05 }, vel: { x: 0.303, y: -0.175, z: -0.02, w: -0.01 }, color: BODY_COLORS[2], name: '丙' },
+                        ]);
+                        setSelectedBody(1);
+                        setIsRunning(false);
+                        setTimeout(resetSimulation, 50);
+                      }} className="w-full py-1.5 px-2 bg-gradient-to-r from-red-600 to-orange-600 hover:from-red-500 hover:to-orange-500 rounded text-xs">
+                        🔺 三体混沌 (1/r²)
+                      </button>
+                      <button onClick={() => {
+                        // 4D三体 - 在不同平面运动
+                        setLambda(-0.01);
+                        setSoftening(0.3);
+                        setGravityPower(3); // 真4D引力
+                        setBodies([
+                          { id: 1, mass: 0.4, pos: { x: 2, y: 0, z: 0, w: 0 }, vel: { x: 0, y: 0.5, z: 0, w: 0 }, color: BODY_COLORS[0], name: 'α' },
+                          { id: 2, mass: 0.4, pos: { x: 0, y: 0, z: 2, w: 0 }, vel: { x: 0, y: 0, z: 0, w: 0.5 }, color: BODY_COLORS[1], name: 'β' },
+                          { id: 3, mass: 0.4, pos: { x: 0, y: 0, z: 0, w: 2 }, vel: { x: 0.5, y: 0, z: 0, w: 0 }, color: BODY_COLORS[2], name: 'γ' },
+                        ]);
+                        setSelectedBody(1);
+                        setIsRunning(false);
+                        setTimeout(resetSimulation, 50);
+                      }} className="w-full py-1.5 px-2 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded text-xs">
+                        🌀 4D正交三体
+                      </button>
+                      <button onClick={() => {
+                        // 双星+行星系统
+                        setLambda(-0.005);
+                        setSoftening(0.2);
+                        setGravityPower(2);
+                        setBodies([
+                          { id: 1, mass: 1.0, pos: { x: 0.5, y: 0, z: 0, w: 0 }, vel: { x: 0, y: 0.3, z: 0, w: 0 }, color: BODY_COLORS[0], name: '主星' },
+                          { id: 2, mass: 1.0, pos: { x: -0.5, y: 0, z: 0, w: 0 }, vel: { x: 0, y: -0.3, z: 0, w: 0 }, color: BODY_COLORS[3], name: '伴星' },
+                          { id: 3, mass: 0.01, pos: { x: 3, y: 0, z: 0, w: 0 }, vel: { x: 0, y: 0.8, z: 0.1, w: 0 }, color: BODY_COLORS[1], name: '行星' },
+                        ]);
+                        setSelectedBody(3);
+                        setIsRunning(false);
+                        setTimeout(resetSimulation, 50);
+                      }} className="w-full py-1.5 px-2 bg-gradient-to-r from-yellow-600 to-amber-600 hover:from-yellow-500 hover:to-amber-500 rounded text-xs">
+                        ⭐ 双星+行星
+                      </button>
+                      <button onClick={() => {
+                        // 默认场景
+                        setLambda(-0.01);
+                        setSoftening(0.3);
+                        setGravityPower(3);
+                        setBodies([
+                          { id: 1, mass: 1.0, pos: vec4.zero(), vel: vec4.zero(), color: BODY_COLORS[0], name: '恒星α' },
+                          { id: 2, mass: 0.1, pos: { x: 2, y: 0, z: 0, w: 0 }, vel: { x: 0, y: 0.7, z: 0, w: 0 }, color: BODY_COLORS[1], name: '行星1' },
+                          { id: 3, mass: 0.1, pos: { x: 0, y: 0, z: 2, w: 0 }, vel: { x: 0, y: 0, z: 0, w: 0.7 }, color: BODY_COLORS[2], name: '行星2' },
+                        ]);
+                        setSelectedBody(1);
+                        setIsRunning(false);
+                        setTimeout(resetSimulation, 50);
+                      }} className="w-full py-1.5 px-2 bg-gray-700 hover:bg-gray-600 rounded text-xs">
+                        🌟 默认场景
+                      </button>
+                    </div>
+                  </div>
+                </Panel>
+              </div>
+
+              {/* 右上：天体列表 */}
+              <div className="absolute top-4 right-4 w-64">
+                <Panel title="天体列表" icon="✨" defaultOpen={true}>
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="text-xs text-gray-400">{bodies.length}/10 天体</span>
+                    <button onClick={addBody} disabled={bodies.length >= 10}
+                      className={`px-2 py-1 rounded text-xs ${bodies.length >= 10 ? 'bg-gray-600' : 'bg-green-600'}`}>+ 添加</button>
+                  </div>
+                  
+                  <div className="space-y-1 max-h-48 overflow-y-auto">
+                    {bodies.map(body => (
+                      <div key={body.id}
+                        className={`p-2 rounded cursor-pointer ${selectedBody === body.id ? 'bg-gray-700 ring-1 ring-cyan-500' : 'hover:bg-gray-800'}`}
+                        onClick={() => setSelectedBody(body.id)}>
+                        <div className="flex justify-between items-center">
+                          <div className="flex items-center gap-2">
+                            <span className="w-3 h-3 rounded-full" style={{ background: body.color }}></span>
+                            <span className="text-xs">{body.name}</span>
+                            <span className="text-xs text-gray-500">M={body.mass}</span>
+                          </div>
+                          {bodies.length > 1 && (
+                            <button onClick={(e) => { e.stopPropagation(); removeBody(body.id); }}
+                              className="text-red-400 text-xs px-1">✕</button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </Panel>
+              </div>
+
+              {/* 右下：选中天体编辑 */}
+              <div className="absolute bottom-4 right-4 w-64">
+                <Panel title={`编辑: ${selectedBodyData?.name || '未选中'}`} icon="📝" defaultOpen={true}>
+                  {selectedBodyData && (
+                    <div className="space-y-2">
+                      <div className="flex gap-2 items-center mb-2">
+                        <input type="text" value={selectedBodyData.name}
+                          onChange={(e) => updateBody(selectedBody, { name: e.target.value })}
+                          className="param-input flex-1" style={{ width: 'auto' }} />
+                        <input type="color" value={selectedBodyData.color}
+                          onChange={(e) => updateBody(selectedBody, { color: e.target.value })}
+                          className="w-8 h-6 rounded cursor-pointer" />
+                      </div>
+                      
+                      <ParamSlider label="质量" value={selectedBodyData.mass}
+                        setValue={(v) => updateBody(selectedBody, { mass: v })}
+                        min={0.001} max={5} step={0.01} onChangeEnd={handleParamChangeEnd} />
+                      
+                      <Vec4Input label="初始位置 (x, y, z, w)"
+                        value={selectedBodyData.pos}
+                        onChange={(pos) => { updateBody(selectedBody, { pos }); handleParamChangeEnd(); }} />
+                      
+                      <Vec4Input label="初始速度 (vx, vy, vz, vw)"
+                        value={selectedBodyData.vel}
+                        onChange={(vel) => { updateBody(selectedBody, { vel }); handleParamChangeEnd(); }} />
+                      
+                      {selectedState && (
+                        <div className="text-xs text-gray-500 mt-2 p-2 bg-gray-800 rounded">
+                          <div>当前位置: ({selectedState.pos.x.toFixed(2)}, {selectedState.pos.y.toFixed(2)}, {selectedState.pos.z.toFixed(2)}, {selectedState.pos.w.toFixed(2)})</div>
+                          <div>速度大小: {vec4.length(selectedState.vel).toFixed(3)}</div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </Panel>
+              </div>
+
+              {/* 标题 */}
+              <div className="absolute top-4 left-1/2 -translate-x-1/2 text-center">
+                <h1 className="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-purple-500">
+                  四维天体模拟器
+                </h1>
+                <p className="text-xs text-gray-500">真·4D N体系统</p>
+              </div>
+
+              {/* 质心信息 */}
+              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-xs text-gray-500 text-center">
+                <div>质心: ({centerOfMass.x.toFixed(4)}, {centerOfMass.y.toFixed(4)}, {centerOfMass.z.toFixed(4)}, {centerOfMass.w.toFixed(4)})</div>
+              </div>
+            </div>
+          );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<OrbitalSimulator4D />);
+    </script>
+</body>
+</html>
+
